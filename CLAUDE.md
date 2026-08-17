@@ -1,0 +1,100 @@
+# Boldtrace
+
+## Project Overview
+
+Boldtrace is a Telegram-based crypto market scanning and alerting bot. It
+ingests real-time exchange data, computes a composite score (0-100) from
+several market signals, and notifies subscribed users via Telegram when a
+symbol crosses a configured score threshold. It is built for retail crypto
+traders who want an automated, statistics-based screening tool. Boldtrace
+does **not** provide investment advice — it surfaces statistical signals
+only.
+
+## Architecture
+
+Cargo workspace with `resolver = "2"`, made up of independently buildable
+and testable crates:
+
+- `shared` — common data types used across crates: `Candle`,
+  `OrderBookSnapshot`, `FundingRate`, `Signal`, `Score`, `User`, `Session`.
+  No business logic; pure data definitions.
+- `exchange-client` — connects to exchange WebSocket (Binance/Bybit) and
+  REST APIs, deserializes market data into `shared` types, and publishes it
+  to Redis for downstream consumers.
+- `score-engine` — pure, stateless functions that compute the composite
+  score from a `ScoreInput` (candles, order book, funding rate). No I/O.
+- `backtest` — loads historical market data with Polars, runs
+  `score-engine` over it, and produces win-rate / average-return statistics.
+- `bot` — teloxide-based Telegram bot: consent/auth flow, commands
+  (`/tara`, `/alarm`, `/language`, `/help`), and i18n message delivery.
+
+Dependency direction: `bot` and `backtest` depend on `score-engine`, which
+depends on `shared`. `exchange-client` depends on `shared`. Crates never
+depend on `bot`.
+
+## Development Setup
+
+1. Install a recent stable Rust toolchain (`rustup default stable`).
+2. `cargo build` to compile the full workspace.
+3. `cargo test` to run all unit tests.
+4. `cargo clippy` to lint.
+5. Copy `.env.example` to `.env` and fill in required variables:
+   - `TELEGRAM_BOT_TOKEN` — Telegram bot API token.
+   - `DATABASE_URL` — Supabase Postgres connection string.
+   - `REDIS_URL` — Redis connection string.
+6. Never commit `.env` or any secret value to the repository.
+
+## Coding Conventions
+
+- All code, identifiers (variables, functions, types, files, folders), code
+  comments, log messages, error messages, and API response keys must be in
+  English, no exceptions.
+- Every user-facing string must come from the i18n system. Hardcoded
+  user-facing strings are not permitted.
+- No AI tool name (Claude, AI, Copilot, GPT, etc.) may appear in branch
+  names, commit messages, or PR titles/descriptions.
+- Commit messages follow Conventional Commits (`feat:`, `fix:`, `chore:`,
+  `docs:`, `refactor:`).
+- Branch names follow `feature/<short-description>` or
+  `fix/<short-description>`.
+- Commit author/committer identity comes from standard git config; do not
+  add extra signatures or attribution trailers.
+
+## i18n Guidelines
+
+- Source language is `en`; all other locales are translated from it.
+- Supported locales: `en`, `tr`, `fr`, `de`, `ar`, `ru`.
+- Locale files live at `/locales/<lang>.ftl` in Fluent format.
+- When adding a new user-facing string:
+  1. Add the key and English text to `/locales/en.ftl` first.
+  2. Add the same key to every other locale file, translated.
+  3. Use the i18n lookup (never a raw string literal) at the call site.
+  4. Respect Fluent's plural rules — `ar` and `ru` have plural categories
+     that differ from `en`; do not assume a two-way singular/plural split.
+- The Telegram bot defaults to the user's Telegram client language and
+  exposes `/language` to switch manually.
+- `ar` is RTL; any UI surface must account for that direction.
+
+## Testing
+
+- Run `cargo test` at the workspace root to run all crate tests.
+- `score-engine` requires a unit test for each individual signal component
+  (volume anomaly, funding rate extremity, order book imbalance, RSI
+  divergence) in addition to the composite `calculate` function.
+- New logic in `exchange-client`, `backtest`, and `bot` should ship with
+  tests covering the behavior it adds.
+- `cargo clippy` must be clean (no warnings) before a change is considered
+  complete.
+
+## Compliance Notes
+
+- Boldtrace is a screening/information tool, not investment advice.
+- Every signal delivered to a user must be accompanied by the disclaimer
+  that it is a statistical probability, not investment advice.
+- Every new user must explicitly accept the terms/disclaimer during
+  onboarding before any command becomes usable; this consent, along with
+  the accepted terms version, must be recorded with a timestamp. If the
+  terms change, users must be asked to re-consent.
+- No user-facing text may use language implying guaranteed returns or
+  direct buy/sell advice (e.g. "guaranteed", "certain profit", "buy/sell
+  recommendation").

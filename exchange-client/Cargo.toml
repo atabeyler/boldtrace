@@ -1,0 +1,8 @@
+[package]
+name = "exchange-client"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+
+[dependencies]
+shared = { path = "../shared" }
