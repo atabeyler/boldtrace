@@ -7,6 +7,7 @@ mod consent;
 mod handlers;
 mod i18n;
 mod market_state;
+mod postgres_user_store;
 mod redis_subscriber;
 mod user_store;
 
@@ -18,7 +19,22 @@ use crate::alarms::AlarmRegistry;
 use crate::commands::Command;
 use crate::handlers::{callback_handler, message_handler, AppState};
 use crate::market_state::MarketState;
-use crate::user_store::InMemoryUserStore;
+use crate::postgres_user_store::PostgresUserStore;
+use crate::user_store::{InMemoryUserStore, UserStore};
+
+async fn build_user_store() -> Arc<dyn UserStore> {
+    let Ok(database_url) = std::env::var("DATABASE_URL") else {
+        tracing::info!("DATABASE_URL not set, using in-memory user store");
+        return Arc::new(InMemoryUserStore::default());
+    };
+    match PostgresUserStore::connect(&database_url).await {
+        Ok(store) => Arc::new(store),
+        Err(err) => {
+            tracing::error!(error = %err, "failed to connect to Postgres, falling back to in-memory user store");
+            Arc::new(InMemoryUserStore::default())
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -29,7 +45,7 @@ async fn main() {
     let weights = score_engine::ScoreWeights::from_env();
 
     let state = AppState {
-        user_store: Arc::new(InMemoryUserStore::default()),
+        user_store: build_user_store().await,
         market_state: Arc::new(MarketState::new(weights)),
         alarms: Arc::new(AlarmRegistry::default()),
     };

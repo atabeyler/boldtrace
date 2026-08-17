@@ -6,7 +6,7 @@ and information tool — not investment advice.
 
 ![Version](https://img.shields.io/badge/version-v0.1.0--alpha-blue)
 ![License](https://img.shields.io/badge/license-Boldtrace%20Custom-lightgrey)
-![Build](https://img.shields.io/badge/build-unknown-lightgrey)
+![Build](https://github.com/atabeyler/boldtrace/actions/workflows/ci.yml/badge.svg)
 
 ## License
 
@@ -32,8 +32,19 @@ cargo test
 cargo clippy
 ```
 
-Configure secrets via a local `.env` file (see `.env.example` once added);
-never commit secrets to the repository.
+Configure secrets via a local `.env` file (copy `.env.example`); never
+commit secrets to the repository. Database schema lives in `/migrations`
+as plain SQL, applied automatically by `bot` on startup via `sqlx::migrate!`
+when `DATABASE_URL` is set (falls back to an in-memory store otherwise).
+
+Build and run with Docker:
+
+```bash
+docker build -t boldtrace .
+docker run --env-file .env boldtrace          # runs the bot (default)
+docker run --env-file .env boldtrace exchange-client
+docker run --env-file .env boldtrace backtest
+```
 
 ## Supported languages
 

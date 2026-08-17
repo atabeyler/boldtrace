@@ -1,0 +1,107 @@
+//! Supabase-Postgres-backed [`UserStore`], used whenever `DATABASE_URL` is
+//! set. Falls back to [`crate::user_store::InMemoryUserStore`] otherwise
+//! (local development without a database).
+
+use async_trait::async_trait;
+use shared::User;
+use sqlx::PgPool;
+
+use crate::user_store::UserStore;
+
+pub struct PostgresUserStore {
+    pool: PgPool,
+}
+
+impl PostgresUserStore {
+    pub async fn connect(database_url: &str) -> Result<Self, sqlx::Error> {
+        let pool = PgPool::connect(database_url).await?;
+        sqlx::migrate!("../migrations").run(&pool).await?;
+        Ok(Self { pool })
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct UserRow {
+    telegram_id: i64,
+    language: String,
+    terms_version: Option<String>,
+    consented_at_millis: Option<i64>,
+}
+
+#[async_trait]
+impl UserStore for PostgresUserStore {
+    async fn get(&self, telegram_id: i64) -> Option<User> {
+        let row = sqlx::query_as::<_, UserRow>(
+            r#"
+            SELECT u.telegram_id, u.language, c.terms_version, c.consented_at_millis
+            FROM users u
+            LEFT JOIN LATERAL (
+                SELECT terms_version, consented_at_millis
+                FROM consents
+                WHERE consents.telegram_id = u.telegram_id
+                ORDER BY consented_at_millis DESC
+                LIMIT 1
+            ) c ON true
+            WHERE u.telegram_id = $1
+            "#,
+        )
+        .bind(telegram_id)
+        .fetch_optional(&self.pool)
+        .await
+        .unwrap_or_else(|err| {
+            tracing::warn!(error = %err, "failed to fetch user");
+            None
+        })?;
+
+        Some(User {
+            telegram_id: row.telegram_id,
+            language: row.language,
+            consent_given_at: row.consented_at_millis,
+            consent_terms_version: row.terms_version,
+        })
+    }
+
+    async fn set_language(&self, telegram_id: i64, language: &str) {
+        let result = sqlx::query(
+            r#"
+            INSERT INTO users (telegram_id, language)
+            VALUES ($1, $2)
+            ON CONFLICT (telegram_id) DO UPDATE SET language = EXCLUDED.language
+            "#,
+        )
+        .bind(telegram_id)
+        .bind(language)
+        .execute(&self.pool)
+        .await;
+
+        if let Err(err) = result {
+            tracing::warn!(error = %err, "failed to set user language");
+        }
+    }
+
+    async fn record_consent(&self, telegram_id: i64, terms_version: &str, consented_at: i64) {
+        let ensure_user = sqlx::query(
+            "INSERT INTO users (telegram_id) VALUES ($1) ON CONFLICT (telegram_id) DO NOTHING",
+        )
+        .bind(telegram_id)
+        .execute(&self.pool)
+        .await;
+        if let Err(err) = ensure_user {
+            tracing::warn!(error = %err, "failed to ensure user row before recording consent");
+            return;
+        }
+
+        let result = sqlx::query(
+            "INSERT INTO consents (telegram_id, terms_version, consented_at_millis) VALUES ($1, $2, $3)",
+        )
+        .bind(telegram_id)
+        .bind(terms_version)
+        .bind(consented_at)
+        .execute(&self.pool)
+        .await;
+
+        if let Err(err) = result {
+            tracing::warn!(error = %err, "failed to record consent");
+        }
+    }
+}

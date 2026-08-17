@@ -45,6 +45,10 @@ depend on `bot`.
    - `DATABASE_URL` — Supabase Postgres connection string.
    - `REDIS_URL` — Redis connection string.
 6. Never commit `.env` or any secret value to the repository.
+7. Database schema lives in `/migrations` as plain SQL files; `bot`
+   applies them automatically via `sqlx::migrate!` on startup when
+   `DATABASE_URL` is set, and falls back to an in-memory user store
+   otherwise (local development without Postgres).
 
 ## Coding Conventions
 
