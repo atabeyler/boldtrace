@@ -8,6 +8,17 @@ license-file.workspace = true
 shared = { path = "../shared" }
 score-engine = { path = "../score-engine" }
 tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+teloxide = { version = "0.17", features = ["macros"] }
+fluent-bundle = "0.15"
+unic-langid = "0.9"
+redis = { version = "0.27", features = ["tokio-comp"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "1"
+async-trait = "0.1"
+futures-util = "0.3"
 
 [[bin]]
 name = "bot"

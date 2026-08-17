@@ -1,0 +1,239 @@
+//! Command and callback handlers. Consent is gated once, here, before any
+//! command other than `/start` runs — handlers below never re-check it.
+
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use teloxide::prelude::*;
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
+
+use crate::alarms::AlarmRegistry;
+use crate::commands::Command;
+use crate::consent;
+use crate::i18n;
+use crate::market_state::MarketState;
+use crate::user_store::UserStore;
+
+#[derive(Clone)]
+pub struct AppState {
+    pub user_store: Arc<dyn UserStore>,
+    pub market_state: Arc<MarketState>,
+    pub alarms: Arc<AlarmRegistry>,
+}
+
+fn now_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+
+fn language_keyboard() -> InlineKeyboardMarkup {
+    let rows: Vec<Vec<InlineKeyboardButton>> = i18n::SUPPORTED_LANGUAGES
+        .iter()
+        .map(|code| {
+            let label = i18n::t("en", &format!("language-name-{code}"));
+            vec![InlineKeyboardButton::callback(label, format!("lang:{code}"))]
+        })
+        .collect();
+    InlineKeyboardMarkup::new(rows)
+}
+
+fn consent_keyboard(lang: &str) -> InlineKeyboardMarkup {
+    let label = i18n::t(lang, "consent-accept-button");
+    InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+        label,
+        "consent:accept",
+    )]])
+}
+
+async fn send(
+    bot: &Bot,
+    chat_id: ChatId,
+    lang: &str,
+    body: &str,
+    keyboard: Option<InlineKeyboardMarkup>,
+) {
+    let text = i18n::with_footer(lang, body);
+    let mut request = bot.send_message(chat_id, text);
+    if let Some(keyboard) = keyboard {
+        request = request.reply_markup(keyboard);
+    }
+    if let Err(err) = request.await {
+        tracing::warn!(error = %err, "failed to send message");
+    }
+}
+
+async fn resolved_language(
+    state: &AppState,
+    telegram_id: i64,
+    telegram_language_code: Option<&str>,
+) -> String {
+    match state.user_store.get(telegram_id).await {
+        Some(user) => user.language,
+        None => i18n::normalize_language(telegram_language_code),
+    }
+}
+
+async fn send_consent_screen(bot: &Bot, chat_id: ChatId, lang: &str) {
+    let body = format!(
+        "{}\n\n{}",
+        i18n::t(lang, "consent-title"),
+        i18n::t(lang, "consent-body")
+    );
+    send(bot, chat_id, lang, &body, Some(consent_keyboard(lang))).await;
+}
+
+/// Handles every text command. Any command other than `/start` is gated
+/// on the user having accepted the current terms version.
+pub async fn message_handler(bot: Bot, msg: Message, cmd: Command, state: AppState) -> ResponseResult<()> {
+    let chat_id = msg.chat.id;
+    let telegram_id = chat_id.0;
+    let telegram_lang_code = msg.from.as_ref().and_then(|u| u.language_code.as_deref());
+    let lang = resolved_language(&state, telegram_id, telegram_lang_code).await;
+
+    if !matches!(cmd, Command::Start) {
+        let user = state.user_store.get(telegram_id).await;
+        if !consent::has_current_consent(user.as_ref()) {
+            send_consent_screen(&bot, chat_id, &lang).await;
+            return Ok(());
+        }
+    }
+
+    match cmd {
+        Command::Start => handle_start(&bot, chat_id, &state, &lang).await,
+        Command::Help => handle_help(&bot, chat_id, &lang).await,
+        Command::Language => {
+            send(&bot, chat_id, &lang, &i18n::t(&lang, "language-prompt"), Some(language_keyboard())).await;
+        }
+        Command::Tara(symbol) => handle_tara(&bot, chat_id, &state, &lang, symbol).await,
+        Command::Alarm { symbol, threshold } => {
+            handle_alarm(&bot, chat_id, telegram_id, &state, &lang, symbol, threshold).await
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_start(bot: &Bot, chat_id: ChatId, state: &AppState, lang: &str) {
+    if state.user_store.get(chat_id.0).await.is_none() {
+        state.user_store.set_language(chat_id.0, lang).await;
+    }
+    let body = format!(
+        "{}\n{}",
+        i18n::t(lang, "welcome-greeting"),
+        i18n::t(lang, "welcome-choose-language")
+    );
+    send(bot, chat_id, lang, &body, Some(language_keyboard())).await;
+}
+
+async fn handle_help(bot: &Bot, chat_id: ChatId, lang: &str) {
+    let body = [
+        i18n::t(lang, "help-title"),
+        i18n::t(lang, "help-tara"),
+        i18n::t(lang, "help-alarm"),
+        i18n::t(lang, "help-language"),
+        i18n::t(lang, "help-help"),
+    ]
+    .join("\n");
+    send(bot, chat_id, lang, &body, None).await;
+}
+
+async fn handle_tara(bot: &Bot, chat_id: ChatId, state: &AppState, lang: &str, symbol: String) {
+    let symbol = symbol.trim().to_uppercase();
+    if symbol.is_empty() {
+        send(bot, chat_id, lang, &i18n::t(lang, "tara-usage"), None).await;
+        return;
+    }
+
+    match state.market_state.latest_score(&symbol) {
+        Some(score) => {
+            let body = i18n::t_args(
+                lang,
+                "tara-result",
+                &[
+                    ("symbol", score.symbol.clone()),
+                    ("score", format!("{:.1}", score.value)),
+                    ("volume_anomaly", format!("{:.1}", score.volume_anomaly)),
+                    ("funding_extreme", format!("{:.1}", score.funding_extreme)),
+                    ("order_book_imbalance", format!("{:.1}", score.order_book_imbalance)),
+                    ("rsi_divergence", format!("{:.1}", score.rsi_divergence)),
+                ],
+            );
+            send(bot, chat_id, lang, &body, None).await;
+        }
+        None => {
+            let body = i18n::t_args(lang, "tara-no-data", &[("symbol", symbol)]);
+            send(bot, chat_id, lang, &body, None).await;
+        }
+    }
+}
+
+async fn handle_alarm(
+    bot: &Bot,
+    chat_id: ChatId,
+    telegram_id: i64,
+    state: &AppState,
+    lang: &str,
+    symbol: String,
+    threshold: String,
+) {
+    let symbol = symbol.trim().to_uppercase();
+    let parsed_threshold: Option<f64> = threshold.trim().parse().ok();
+
+    let threshold = match parsed_threshold {
+        Some(value) if (0.0..=100.0).contains(&value) && !symbol.is_empty() => value,
+        Some(_) => {
+            send(bot, chat_id, lang, &i18n::t(lang, "alarm-invalid-threshold"), None).await;
+            return;
+        }
+        None => {
+            send(bot, chat_id, lang, &i18n::t(lang, "alarm-usage"), None).await;
+            return;
+        }
+    };
+
+    state.alarms.set(telegram_id, &symbol, threshold);
+    let body = i18n::t_args(
+        lang,
+        "alarm-set",
+        &[("symbol", symbol), ("threshold", format!("{:.1}", threshold))],
+    );
+    send(bot, chat_id, lang, &body, None).await;
+}
+
+/// Handles inline-keyboard taps: language selection and the consent
+/// "I Agree" button.
+pub async fn callback_handler(bot: Bot, query: CallbackQuery, state: AppState) -> ResponseResult<()> {
+    let data = query.data.clone().unwrap_or_default();
+    let Some(message) = query.regular_message() else {
+        bot.answer_callback_query(query.id).await.ok();
+        return Ok(());
+    };
+    let chat_id = message.chat.id;
+    let telegram_id = chat_id.0;
+
+    if let Some(code) = data.strip_prefix("lang:") {
+        if i18n::is_supported(code) {
+            state.user_store.set_language(telegram_id, code).await;
+            let language_name = i18n::t(code, &format!("language-name-{code}"));
+            let body = i18n::t_args(code, "language-changed", &[("language", language_name)]);
+            send(&bot, chat_id, code, &body, None).await;
+
+            let user = state.user_store.get(telegram_id).await;
+            if !consent::has_current_consent(user.as_ref()) {
+                send_consent_screen(&bot, chat_id, code).await;
+            }
+        }
+    } else if data == "consent:accept" {
+        state
+            .user_store
+            .record_consent(telegram_id, consent::CURRENT_TERMS_VERSION, now_millis())
+            .await;
+        let lang = resolved_language(&state, telegram_id, None).await;
+        handle_help(&bot, chat_id, &lang).await;
+    }
+
+    bot.answer_callback_query(query.id).await.ok();
+    Ok(())
+}
