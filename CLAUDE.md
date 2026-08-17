@@ -20,7 +20,9 @@ and testable crates:
   No business logic; pure data definitions.
 - `exchange-client` — connects to exchange WebSocket (Binance/Bybit) and
   REST APIs, deserializes market data into `shared` types, and publishes it
-  to Redis for downstream consumers.
+  to Redis for downstream consumers. Publishes on `candles:<symbol>:<interval>`,
+  `orderbook:<symbol>`, and `funding:<symbol>` (funding rate comes from the
+  futures WebSocket, since it does not exist on the spot market).
 - `score-engine` — pure, stateless functions that compute the composite
   score from a `ScoreInput` (candles, order book, funding rate). No I/O.
 - `backtest` — loads historical market data with Polars, runs
