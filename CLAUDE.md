@@ -1,147 +1,116 @@
-# Boldtrace
+# BOLDTRACE — Productization Agent Contract
 
-## Project Overview
+## Project Purpose
+BOLDTRACE is a multilingual market-intelligence platform. It ingests live exchange data, evaluates deterministic signal and specialized intelligence engines, produces explainable probabilistic decisions, applies an independent risk/no-trade gate, records realized outcomes, and adapts per-symbol signal weights from observed performance.
 
-Boldtrace is a Telegram-based crypto market scanning and alerting bot. It
-ingests real-time exchange data, computes a composite score (0-100) from
-several market signals, and notifies subscribed users via Telegram when a
-symbol crosses a configured score threshold. It is built for retail crypto
-traders who want an automated, statistics-based screening tool. Boldtrace
-does **not** provide investment advice — it surfaces statistical signals
-only.
+BOLDTRACE is an information and statistical screening product. It does not promise returns and must never present probabilistic output as guaranteed investment advice.
+
+## Cardinal Rules
+1. Never fabricate live market data, confidence, risk, performance, engine state, health, or outcomes. UI values must come from real backend state; unavailable data is shown as unavailable/warming-up.
+2. Risk Guardian has final veto. No presentation layer may bypass a `NO TRADE`/safety decision.
+3. Adaptive learning may tune bounded weights only from persisted realized outcomes. No self-modification without evidence, sample-size gates, and bounds.
+4. User-facing text must be localized. No hardcoded production UI copy.
+5. Authentication, consent, session handling, and authorization are server-enforced. Client-side route guards are UX, never the security boundary.
+6. Secrets never enter source control, logs, browser bundles, or analytics.
+7. Productization work stays on `agent/productization-v1`. Do not open PRs and do not modify `main`; the owner performs final merge/push workflow.
 
 ## Architecture
+- `shared` — common market/domain types.
+- `exchange-client` — exchange WebSocket/REST ingestion and Redis publication.
+- `score-engine` — pure deterministic scoring, market intelligence, specialized engines, confidence calibration, adaptive weights.
+- `backtest` — historical validation.
+- `bot` — Telegram delivery, consent, alerts, persistence integration.
+- `migrations` — PostgreSQL schema.
+- `locales` — Fluent localization resources.
+- `web` — product web client (React + TypeScript + Vite), created during productization.
+- `api` — product HTTP/WebSocket API boundary, created during productization.
 
-Cargo workspace with `resolver = "2"`, made up of independently buildable
-and testable crates:
+Target runtime flow:
+`Exchange -> validation/data health -> MarketState -> score/intelligence -> Risk Guardian -> outcome/adaptive learning -> PostgreSQL -> API -> Web + Telegram`.
 
-- `shared` — common data types used across crates: `Candle`,
-  `OrderBookSnapshot`, `FundingRate`, `Signal`, `Score`, `User`, `Session`.
-  No business logic; pure data definitions.
-- `exchange-client` — connects to exchange WebSocket (Binance/Bybit) and
-  REST APIs, deserializes market data into `shared` types, and publishes it
-  to Redis for downstream consumers. Publishes on `candles:<symbol>:<interval>`,
-  `orderbook:<symbol>`, and `funding:<symbol>` (funding rate comes from the
-  futures WebSocket, since it does not exist on the spot market).
-- `score-engine` — pure, stateless functions that compute the composite
-  score from a `ScoreInput` (candles, order book, funding rate). No I/O.
-- `backtest` — loads historical market data with Polars, runs
-  `score-engine` over it, and produces win-rate / average-return statistics.
-- `bot` — teloxide-based Telegram bot: consent/auth flow, commands
-  (`/tara`, `/alarm`, `/language`, `/help`), and i18n message delivery.
+## Product Surfaces
+The V1 web product contains: Command Center, Intelligence Terminal, Engine Matrix, Performance Center, Learning Center, Alert Center, Market Scanner, System Health, account/settings, login and registration.
 
-Dependency direction: `bot` and `backtest` depend on `score-engine`, which
-depends on `shared`. `exchange-client` depends on `shared`. Crates never
-depend on `bot`.
+Every page uses a shared application shell and the same brand footer. Desktop and mobile are first-class layouts; Arabic must render RTL correctly.
 
-## Development Setup
+## Authentication & Registration Contract
+Use the proven Anatolia-Sim flow as the reference pattern, adapted to BOLDTRACE terminology and security requirements:
+- Login and registration are two states of one branded authentication surface.
+- Registration captures first name, last name, email, password and a BOLDTRACE user code/handle where required by the server model. Do not copy Turkey-specific identity fields unless BOLDTRACE explicitly needs them.
+- Login supports a deliberate “remember me” choice; persistent vs session storage behavior must be explicit.
+- Server issues/validates authentication and role state. Prefer secure HttpOnly refresh/session cookies; keep short-lived access material out of persistent browser storage where feasible.
+- Pending/approval UI may be supported if BOLDTRACE enables administrator approval; otherwise registration becomes immediate activation/email-verification without fake pending states.
+- Errors are localized and must not leak whether sensitive account identifiers exist.
+- Consent/terms acceptance is versioned and timestamped before intelligence features are usable.
 
-1. Install a recent stable Rust toolchain (`rustup default stable`).
-2. `cargo build` to compile the full workspace.
-3. `cargo test` to run all unit tests.
-4. `cargo clippy` to lint.
-5. Copy `.env.example` to `.env` and fill in required variables:
-   - `TELEGRAM_BOT_TOKEN` — Telegram bot API token.
-   - `DATABASE_URL` — Supabase Postgres connection string.
-   - `REDIS_URL` — Redis connection string.
-6. Never commit `.env` or any secret value to the repository.
-7. Database schema lives in `/migrations` as plain SQL files; `bot`
-   applies them automatically via `sqlx::migrate!` on startup when
-   `DATABASE_URL` is set, and falls back to an in-memory user store
-   otherwise (local development without Postgres).
+Reference implementation concepts come from `atabeyler/anatolia.bold.sim/client/src/pages/LoginPage.tsx`: cinematic branded entry, login/register mode switching, remember-session behavior, localized status/error text, and server-backed auth calls. Reuse the interaction model, not simulation-specific DNA/genome visuals or fields.
+
+## Six-Language Contract
+Supported V1 locales are exactly:
+- `tr` Turkish
+- `en` English (source locale)
+- `de` German
+- `fr` French
+- `ar` Arabic (RTL)
+- `ru` Russian
+
+All web and Telegram user-facing strings must exist in all six languages. New keys are authored in English first and then translated. Arabic layouts use `dir=rtl` at the application/root content boundary and components must remain usable when direction changes.
+
+## Brand System
+Brand name: **BOLDTRACE**.
+Visual character: institutional market intelligence, premium, technical, restrained, high-contrast dark surfaces with luminous signal accents. Avoid casino/gambling aesthetics, meme-coin styling, fake profit imagery, excessive neon, and decorative values that look like live data.
+
+The BOLDTRACE mark should communicate trace/signal/market structure: a distinctive geometric `B`/trace monogram plus BOLDTRACE wordmark, suitable for app icon, favicon, login hero, navigation rail and reports. Keep vector source in the repository and derive monochrome/small-size variants.
+
+## Shared Footer Contract
+Every full page uses one shared footer component, based on the reference `FooterBar` pattern rather than duplicated page markup.
+
+Localized company line:
+- TR: `Bold Askeri Teknoloji ve Savunma Sanayi A.Ş.`
+- EN: `Bold Military Technology and Defense Industry Inc.`
+- DE/FR/AR/RU: localized legal display strings from i18n resources.
+
+Footer includes `BOLDTRACE © 2026`, company name, localized “All rights reserved”, and a concise localized statistical-information/not-investment-advice notice where the surface requires it. Footer placement supports `fixed`, `flow`, and `inline` modes so auth, dashboard, mobile and report surfaces can reuse one component.
+
+## UI/UX Rules
+- Never show invented prices, win rates, confidence or engine scores in production mode.
+- Loading skeletons are visually distinct from real values.
+- `WARMING_UP`, `STALE`, `DEGRADED`, `OFFLINE`, and insufficient-sample states are explicit.
+- Decision color is not the only carrier of meaning; always pair color with text/iconography.
+- Core decision card shows decision, confidence, risk, data quality, regime and freshness.
+- “Why?” explanations are derived from real engine outputs.
+- Performance always displays sample count/reliability context.
+- Mobile navigation prioritizes Intelligence, Chart, Engines, Performance.
+- Accessibility: keyboard navigation, focus states, semantic controls, reduced-motion support, contrast, screen-reader labels.
+
+## Intelligence & Learning Invariants
+- Outcome horizons: 15, 60, 240 minutes unless schema/version explicitly changes.
+- Neutral/NoTrade outcomes do not contaminate directional accuracy.
+- Per-symbol adaptive weights are bounded and normalized.
+- Minimum sample gates are mandatory before adaptation.
+- Persisted realized outcomes are the source of truth for learning; runtime caches are disposable.
+- Startup bootstrap reconstructs learned state from PostgreSQL before claiming the system is fully warmed.
+- Stale or missing required data reduces quality and can force NoTrade.
+
+## API Contract
+Expose versioned product endpoints under `/api/v1`. Planned surfaces include markets, symbol intelligence, engines, performance, history, alerts, account/session, and health. Use typed response DTOs; never expose internal database rows directly. Real-time updates use a controlled WebSocket/SSE channel with reconnect/backoff and freshness timestamps.
+
+## Data Health
+Track freshness independently for candle, order book, funding, open interest, Redis, PostgreSQL and exchange connectivity. Aggregate state is one of `HEALTHY`, `WARMING_UP`, `DEGRADED`, `OFFLINE`. Health status is observable via API and UI and participates in Risk Guardian decisions.
 
 ## Coding Conventions
+- Code, identifiers, comments, logs, API keys and technical docs are English.
+- User-facing copy comes from i18n resources.
+- Rust stays deterministic and testable; scoring logic remains free of UI/network concerns.
+- TypeScript uses strict typing; avoid `any` in product code.
+- Shared UI primitives are preferred over page-specific duplication.
+- Conventional commit messages: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`.
+- Do not add tool/assistant attribution to commits or files.
 
-- All code, identifiers (variables, functions, types, files, folders), code
-  comments, log messages, error messages, and API response keys must be in
-  English, no exceptions.
-- Every user-facing string must come from the i18n system. Hardcoded
-  user-facing strings are not permitted.
-- No AI tool name (Claude, AI, Copilot, GPT, etc.) may appear in branch
-  names, commit messages, PR titles/descriptions, or code comments.
-- Commit messages follow Conventional Commits (`feat:`, `fix:`, `chore:`,
-  `docs:`, `refactor:`).
-- Branch names follow `feature/<short-description>` or
-  `fix/<short-description>`.
+## Testing & Completion
+A feature is complete when its domain logic, API contract, localization, loading/error/empty states, mobile behavior and relevant tests exist. Tests must cover risk vetoes, auth authorization boundaries, locale fallback/RTL, data freshness, outcome learning bounds, and critical API DTOs.
 
-## Git Identity and Commit Rules
+CI may be handled separately by the repository owner during this productization cycle; do not stop feature work merely to manage CI workflows unless explicitly asked. Do not knowingly leave syntax/type errors in touched code.
 
-- Commit author/committer identity must always be a real project identity
-  (e.g. `atabeyler <info@boldkimya.com.tr>`), never a generic tool default
-  (e.g. `Claude <noreply@anthropic.com>` or similar). Before committing,
-  verify with `git config --local user.name` / `git config --local
-  user.email`, and set them explicitly if empty or wrong:
-  ```
-  git config --local user.name "atabeyler"
-  git config --local user.email "info@boldkimya.com.tr"
-  ```
-- Never add an AI signature or attribution trailer to a commit message or
-  any file (`Generated by Claude`, `Co-Authored-By: Claude ...`,
-  `Claude-Session: ...`, etc.). Commit author/committer identity comes from
-  standard git config only — do not add extra signatures or attribution
-  trailers, whether from a harness default template or otherwise.
-- Proofread every commit message, branch name, and PR title/body for
-  tool-name mentions before pushing — history that reaches `origin` cannot
-  be cleanly erased afterward, so get it right before the push, not after.
-
-## i18n Guidelines
-
-- Source language is `en`; all other locales are translated from it.
-- Supported locales: `en`, `tr`, `fr`, `de`, `ar`, `ru`.
-- Locale files live at `/locales/<lang>.ftl` in Fluent format.
-- When adding a new user-facing string:
-  1. Add the key and English text to `/locales/en.ftl` first.
-  2. Add the same key to every other locale file, translated.
-  3. Use the i18n lookup (never a raw string literal) at the call site.
-  4. Respect Fluent's plural rules — `ar` and `ru` have plural categories
-     that differ from `en`; do not assume a two-way singular/plural split.
-- The Telegram bot defaults to the user's Telegram client language and
-  exposes `/language` to switch manually.
-- `ar` is RTL; any UI surface must account for that direction.
-
-## Footer, Menu, and Settings Conventions
-
-Boldtrace follows the same footer/menu pattern used across the reference
-Bold products:
-
-- **Footer.** Every message the bot sends carries a fixed, localized
-  footer: the company/legal line (`Bold A.S. © 2026 · <all rights
-  reserved, translated>`) followed by the mandatory disclaimer ("this is a
-  statistical probability, not investment advice"). Both lines are i18n
-  keys — never hardcoded — and are resolved from the recipient's current
-  language on every send, the same way the reference clients resolve their
-  footer bar per-locale rather than baking in one language.
-- **Menu / settings as an overlay, not inline text.** `/language` and
-  `/help` are presented as a self-contained menu (Telegram inline
-  keyboard) the user can act on directly, mirroring the reference clients'
-  settings/menu overlays: one entry per option, the current selection
-  indicated, and a way back to the previous state. Do not require the user
-  to type a raw parameter when a keyboard selection is possible.
-- **Consistency.** The footer and menu copy live next to the other i18n
-  strings in `/locales/<lang>.ftl` and are updated through the same
-  process described in i18n Guidelines above — add the key to `en.ftl`
-  first, then every other locale.
-
-## Testing
-
-- Run `cargo test` at the workspace root to run all crate tests.
-- `score-engine` requires a unit test for each individual signal component
-  (volume anomaly, funding rate extremity, order book imbalance, RSI
-  divergence) in addition to the composite `calculate` function.
-- New logic in `exchange-client`, `backtest`, and `bot` should ship with
-  tests covering the behavior it adds.
-- `cargo clippy` must be clean (no warnings) before a change is considered
-  complete.
-
-## Compliance Notes
-
-- Boldtrace is a screening/information tool, not investment advice.
-- Every signal delivered to a user must be accompanied by the disclaimer
-  that it is a statistical probability, not investment advice.
-- Every new user must explicitly accept the terms/disclaimer during
-  onboarding before any command becomes usable; this consent, along with
-  the accepted terms version, must be recorded with a timestamp. If the
-  terms change, users must be asked to re-consent.
-- No user-facing text may use language implying guaranteed returns or
-  direct buy/sell advice (e.g. "guaranteed", "certain profit", "buy/sell
-  recommendation").
+## Reference Product
+`atabeyler/anatolia.bold.sim` is the design/interaction reference for agent instructions, login/register presentation, multilingual patterns and shared footer treatment. BOLDTRACE must adapt those patterns to financial-market intelligence rather than copying simulation-specific domain concepts.
