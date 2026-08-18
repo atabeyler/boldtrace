@@ -79,10 +79,17 @@ const USER_ROW_COLUMNS: &str =
 pub struct RegisterRequest {
     pub first_name: String,
     pub last_name: String,
+    pub user_code: String,
+    pub country: String,
+    pub national_id: String,
     pub email: String,
     pub password: String,
     pub language: Option<String>,
     pub terms_accepted: bool,
+}
+
+fn is_valid_user_code(code: &str) -> bool {
+    (4..=20).contains(&code.len()) && code.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
 #[derive(Debug, Deserialize)]
@@ -123,17 +130,6 @@ fn random_hex(bytes: usize) -> String {
     let mut buf = vec![0u8; bytes];
     OsRng.fill_bytes(&mut buf);
     buf.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-fn generate_user_code() -> String {
-    const ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    let mut buf = [0u8; 6];
-    OsRng.fill_bytes(&mut buf);
-    let suffix: String = buf
-        .iter()
-        .map(|b| ALPHABET[(*b as usize) % ALPHABET.len()] as char)
-        .collect();
-    format!("BT-{suffix}")
 }
 
 fn hash_token(token: &str) -> String {
@@ -200,13 +196,21 @@ pub async fn register(
     }
     let first_name = req.first_name.trim().to_string();
     let last_name = req.last_name.trim().to_string();
+    let country = req.country.trim().to_string();
+    let national_id = req.national_id.trim().to_string();
+    let user_code = req.user_code.trim().to_uppercase();
     if email.is_empty()
         || !email.contains('@')
         || first_name.is_empty()
         || last_name.is_empty()
+        || country.is_empty()
+        || national_id.is_empty()
         || req.password.len() < 8
     {
         return error(StatusCode::BAD_REQUEST, "invalid_input").into_response();
+    }
+    if !is_valid_user_code(&user_code) {
+        return error(StatusCode::BAD_REQUEST, "invalid_user_code").into_response();
     }
     if !req.terms_accepted {
         return error(StatusCode::BAD_REQUEST, "terms_not_accepted").into_response();
@@ -225,41 +229,32 @@ pub async fn register(
         .unwrap_or(false);
     let status = if is_bootstrap_admin { "approved" } else { "pending" };
 
-    let mut attempts = 0;
-    let row: Result<UserRow, sqlx::Error> = loop {
-        attempts += 1;
-        let user_code = generate_user_code();
-        let result = sqlx::query_as::<_, UserRow>(&format!(
-            "INSERT INTO web_users (id, user_code, email, first_name, last_name, password_hash, language, status, is_admin) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
-             RETURNING {USER_ROW_COLUMNS}"
-        ))
-        .bind(&id)
-        .bind(&user_code)
-        .bind(&email)
-        .bind(&first_name)
-        .bind(&last_name)
-        .bind(&password_hash)
-        .bind(&language)
-        .bind(status)
-        .bind(is_bootstrap_admin)
-        .fetch_one(&pool)
-        .await;
-        match result {
-            Ok(row) => break Ok(row),
-            Err(sqlx::Error::Database(db_err))
-                if db_err.constraint() == Some("web_users_user_code_key") && attempts < 5 =>
-            {
-                continue
-            }
-            Err(err) => break Err(err),
-        }
-    };
+    let result = sqlx::query_as::<_, UserRow>(&format!(
+        "INSERT INTO web_users (id, user_code, email, first_name, last_name, password_hash, language, status, is_admin, country, national_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) \
+         RETURNING {USER_ROW_COLUMNS}"
+    ))
+    .bind(&id)
+    .bind(&user_code)
+    .bind(&email)
+    .bind(&first_name)
+    .bind(&last_name)
+    .bind(&password_hash)
+    .bind(&language)
+    .bind(status)
+    .bind(is_bootstrap_admin)
+    .bind(&country)
+    .bind(&national_id)
+    .fetch_one(&pool)
+    .await;
 
-    let row = match row {
+    let row = match result {
         Ok(row) => row,
         Err(sqlx::Error::Database(db_err)) if db_err.constraint() == Some("web_users_email_key") => {
             return error(StatusCode::CONFLICT, "email_taken").into_response();
+        }
+        Err(sqlx::Error::Database(db_err)) if db_err.constraint() == Some("web_users_user_code_key") => {
+            return error(StatusCode::CONFLICT, "user_code_taken").into_response();
         }
         Err(err) => {
             tracing::warn!(error=%err, "failed to create web account");
@@ -282,6 +277,14 @@ pub async fn register(
 
     if row.status != "approved" {
         // Pending accounts can't sign in yet, so no session is issued.
+        crate::email::notify_admin_new_registration(
+            &state.email,
+            &row.first_name,
+            &row.last_name,
+            &row.email,
+            &row.user_code,
+        )
+        .await;
         return (StatusCode::CREATED, Json(AccountView::from(row))).into_response();
     }
 

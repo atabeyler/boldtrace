@@ -1,6 +1,7 @@
 mod adapter;
 mod admin;
 mod auth;
+mod email;
 mod history;
 mod live_store;
 mod rate_limit;
@@ -98,6 +99,7 @@ async fn main() {
         pool,
         secure_cookies,
         auth_rate_limiter: std::sync::Arc::new(rate_limit::RateLimiter::default()),
+        email: email::EmailConfig::from_env(),
     };
 
     let cors = env::var("WEB_ORIGIN").ok().map(|origin| {

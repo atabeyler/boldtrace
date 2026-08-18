@@ -20,6 +20,8 @@ pub struct PendingUser {
     pub email: String,
     pub first_name: String,
     pub last_name: String,
+    pub country: String,
+    pub national_id: String,
     pub created_at: String,
 }
 
@@ -30,6 +32,8 @@ struct PendingRow {
     email: String,
     first_name: String,
     last_name: String,
+    country: String,
+    national_id: String,
     created_at: time::OffsetDateTime,
 }
 
@@ -41,6 +45,8 @@ impl From<PendingRow> for PendingUser {
             email: r.email,
             first_name: r.first_name,
             last_name: r.last_name,
+            country: r.country,
+            national_id: r.national_id,
             created_at: r
                 .created_at
                 .format(&time::format_description::well_known::Rfc3339)
@@ -73,7 +79,7 @@ pub async fn list_pending(State(state): State<AppState>, jar: CookieJar) -> impl
         Err(resp) => return resp,
     };
     let rows = sqlx::query_as::<_, PendingRow>(
-        "SELECT id, user_code, email, first_name, last_name, created_at \
+        "SELECT id, user_code, email, first_name, last_name, country, national_id, created_at \
          FROM web_users WHERE status = 'pending' ORDER BY created_at ASC",
     )
     .fetch_all(&pool)
@@ -97,14 +103,23 @@ async fn set_status(
         Ok(pool) => pool,
         Err(resp) => return resp,
     };
-    let result = sqlx::query("UPDATE web_users SET status = $1 WHERE id = $2 AND status = 'pending'")
-        .bind(status)
-        .bind(&user_id)
-        .execute(&pool)
-        .await;
+    let result = sqlx::query_as::<_, (String, String)>(
+        "UPDATE web_users SET status = $1 WHERE id = $2 AND status = 'pending' RETURNING email, first_name",
+    )
+    .bind(status)
+    .bind(&user_id)
+    .fetch_optional(&pool)
+    .await;
     match result {
-        Ok(r) if r.rows_affected() == 1 => StatusCode::NO_CONTENT.into_response(),
-        Ok(_) => error(StatusCode::NOT_FOUND, "pending_account_not_found").into_response(),
+        Ok(Some((email, first_name))) => {
+            if status == "approved" {
+                crate::email::notify_applicant_approved(&state.email, &email, &first_name).await;
+            } else {
+                crate::email::notify_applicant_rejected(&state.email, &email, &first_name).await;
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Ok(None) => error(StatusCode::NOT_FOUND, "pending_account_not_found").into_response(),
         Err(err) => {
             tracing::warn!(error=%err, "failed to update account status");
             error(StatusCode::INTERNAL_SERVER_ERROR, "update_failed").into_response()

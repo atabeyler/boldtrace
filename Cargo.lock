@@ -3130,6 +3130,7 @@ dependencies = [
  "axum-extra",
  "rand 0.8.7",
  "redis",
+ "reqwest",
  "score-engine",
  "serde",
  "serde_json",
