@@ -39,17 +39,21 @@ pub struct AccountView {
     pub first_name: String,
     pub last_name: String,
     pub language: String,
+    pub status: String,
+    pub is_admin: bool,
 }
 
 #[derive(sqlx::FromRow)]
-struct UserRow {
-    id: String,
-    user_code: String,
-    email: String,
-    first_name: String,
-    last_name: String,
-    password_hash: String,
-    language: String,
+pub(crate) struct UserRow {
+    pub(crate) id: String,
+    pub(crate) user_code: String,
+    pub(crate) email: String,
+    pub(crate) first_name: String,
+    pub(crate) last_name: String,
+    pub(crate) password_hash: String,
+    pub(crate) language: String,
+    pub(crate) status: String,
+    pub(crate) is_admin: bool,
 }
 
 impl From<UserRow> for AccountView {
@@ -61,9 +65,14 @@ impl From<UserRow> for AccountView {
             first_name: r.first_name,
             last_name: r.last_name,
             language: r.language,
+            status: r.status,
+            is_admin: r.is_admin,
         }
     }
 }
+
+const USER_ROW_COLUMNS: &str =
+    "id, user_code, email, first_name, last_name, password_hash, language, status, is_admin";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -85,11 +94,11 @@ pub struct LoginRequest {
 }
 
 #[derive(Debug, Serialize)]
-struct ErrorBody {
+pub(crate) struct ErrorBody {
     error: &'static str,
 }
 
-fn error(status: StatusCode, code: &'static str) -> (StatusCode, Json<ErrorBody>) {
+pub(crate) fn error(status: StatusCode, code: &'static str) -> (StatusCode, Json<ErrorBody>) {
     (status, Json(ErrorBody { error: code }))
 }
 
@@ -145,7 +154,7 @@ fn session_cookie(secure: bool, token: String, remember_me: bool) -> Cookie<'sta
     cookie
 }
 
-fn require_pool(state: &AppState) -> Result<PgPool, (StatusCode, Json<ErrorBody>)> {
+pub(crate) fn require_pool(state: &AppState) -> Result<PgPool, (StatusCode, Json<ErrorBody>)> {
     state
         .pool
         .clone()
@@ -208,15 +217,23 @@ pub async fn register(
     let language = req.language.unwrap_or_else(|| "en".into());
     let id = random_hex(16);
 
+    // A registration matching ADMIN_BOOTSTRAP_EMAIL is auto-approved and
+    // made an admin, so the very first admin account can be created without
+    // any prior admin existing to approve it.
+    let is_bootstrap_admin = std::env::var("ADMIN_BOOTSTRAP_EMAIL")
+        .map(|bootstrap| bootstrap.trim().to_lowercase() == email)
+        .unwrap_or(false);
+    let status = if is_bootstrap_admin { "approved" } else { "pending" };
+
     let mut attempts = 0;
     let row: Result<UserRow, sqlx::Error> = loop {
         attempts += 1;
         let user_code = generate_user_code();
-        let result = sqlx::query_as::<_, UserRow>(
-            "INSERT INTO web_users (id, user_code, email, first_name, last_name, password_hash, language) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7) \
-             RETURNING id, user_code, email, first_name, last_name, password_hash, language",
-        )
+        let result = sqlx::query_as::<_, UserRow>(&format!(
+            "INSERT INTO web_users (id, user_code, email, first_name, last_name, password_hash, language, status, is_admin) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
+             RETURNING {USER_ROW_COLUMNS}"
+        ))
         .bind(&id)
         .bind(&user_code)
         .bind(&email)
@@ -224,6 +241,8 @@ pub async fn register(
         .bind(&last_name)
         .bind(&password_hash)
         .bind(&language)
+        .bind(status)
+        .bind(is_bootstrap_admin)
         .fetch_one(&pool)
         .await;
         match result {
@@ -261,6 +280,11 @@ pub async fn register(
         tracing::warn!(error=%err, "failed to record web consent");
     }
 
+    if row.status != "approved" {
+        // Pending accounts can't sign in yet, so no session is issued.
+        return (StatusCode::CREATED, Json(AccountView::from(row))).into_response();
+    }
+
     let token = match create_session(&pool, &row.id, false).await {
         Ok(token) => token,
         Err(err) => {
@@ -289,9 +313,9 @@ pub async fn login(
         return error(StatusCode::TOO_MANY_REQUESTS, "rate_limited").into_response();
     }
     let remember_me = req.remember_me.unwrap_or(false);
-    let row = sqlx::query_as::<_, UserRow>(
-        "SELECT id, user_code, email, first_name, last_name, password_hash, language FROM web_users WHERE email = $1",
-    )
+    let row = sqlx::query_as::<_, UserRow>(&format!(
+        "SELECT {USER_ROW_COLUMNS} FROM web_users WHERE email = $1"
+    ))
     .bind(&email)
     .fetch_optional(&pool)
     .await;
@@ -318,6 +342,11 @@ pub async fn login(
     let Some(row) = row.filter(|_| ok) else {
         return error(StatusCode::UNAUTHORIZED, "invalid_credentials").into_response();
     };
+    match row.status.as_str() {
+        "pending" => return error(StatusCode::FORBIDDEN, "account_pending").into_response(),
+        "rejected" => return error(StatusCode::FORBIDDEN, "account_rejected").into_response(),
+        _ => {}
+    }
 
     let token = match create_session(&pool, &row.id, remember_me).await {
         Ok(token) => token,
@@ -344,24 +373,37 @@ pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
     (StatusCode::NO_CONTENT, jar)
 }
 
+/// Resolves the caller's session cookie to their user row, if any live
+/// session matches. Shared by `me` and the admin endpoints, which both need
+/// to know who's asking before answering.
+pub(crate) async fn session_user(
+    pool: &PgPool,
+    jar: &CookieJar,
+) -> Result<Option<UserRow>, sqlx::Error> {
+    let Some(cookie) = jar.get(SESSION_COOKIE) else {
+        return Ok(None);
+    };
+    let columns = USER_ROW_COLUMNS
+        .split(", ")
+        .map(|c| format!("u.{c}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    sqlx::query_as::<_, UserRow>(&format!(
+        "SELECT {columns} \
+         FROM web_sessions s JOIN web_users u ON u.id = s.user_id \
+         WHERE s.token_hash = $1 AND s.expires_at > now()"
+    ))
+    .bind(hash_token(cookie.value()))
+    .fetch_optional(pool)
+    .await
+}
+
 pub async fn me(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
     let pool = match require_pool(&state) {
         Ok(pool) => pool,
         Err(err) => return err.into_response(),
     };
-    let Some(cookie) = jar.get(SESSION_COOKIE) else {
-        return error(StatusCode::UNAUTHORIZED, "not_authenticated").into_response();
-    };
-    let row = sqlx::query_as::<_, UserRow>(
-        "SELECT u.id, u.user_code, u.email, u.first_name, u.last_name, u.password_hash, u.language \
-         FROM web_sessions s JOIN web_users u ON u.id = s.user_id \
-         WHERE s.token_hash = $1 AND s.expires_at > now()",
-    )
-    .bind(hash_token(cookie.value()))
-    .fetch_optional(&pool)
-    .await;
-
-    match row {
+    match session_user(&pool, &jar).await {
         Ok(Some(row)) => Json(AccountView::from(row)).into_response(),
         Ok(None) => error(StatusCode::UNAUTHORIZED, "not_authenticated").into_response(),
         Err(err) => {

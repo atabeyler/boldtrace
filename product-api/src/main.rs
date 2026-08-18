@@ -1,4 +1,5 @@
 mod adapter;
+mod admin;
 mod auth;
 mod history;
 mod live_store;
@@ -118,6 +119,9 @@ async fn main() {
         .route("/api/v1/auth/login", post(auth::login))
         .route("/api/v1/auth/logout", post(auth::logout))
         .route("/api/v1/auth/me", get(auth::me))
+        .route("/api/v1/admin/pending-users", get(admin::list_pending))
+        .route("/api/v1/admin/users/:id/approve", post(admin::approve))
+        .route("/api/v1/admin/users/:id/reject", post(admin::reject))
         .with_state(state)
         .layer(TraceLayer::new_for_http());
 
