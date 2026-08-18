@@ -1,5 +1,6 @@
 //! Pure, stateless composite scoring logic for market data.
 pub mod advanced;
+pub mod explain;
 pub mod intelligence;
 pub mod microstructure;
 pub mod quality;
@@ -7,6 +8,7 @@ mod input;
 mod signals;
 mod weights;
 pub use advanced::{market_regime, market_structure, volatility, MarketRegime, RegimeResult, StructureResult, StructureState, VolatilityResult, VolatilityState};
+pub use explain::{explain, Explanation};
 pub use intelligence::{anomaly_zscore, correlation, meta_decision, multi_timeframe, AnomalyResult, AnomalySeverity, CorrelationResult, Decision, MetaDecision, TimeframeResult};
 pub use microstructure::{derivatives, liquidity_order_flow, DerivativesPressure, DerivativesResult, DominantSide, LiquidityResult};
 pub use quality::{data_quality, empirical_calibration, risk, signal_quality, AdaptiveWeights, CalibrationResult, ConfidenceLevel, DataQualityResult, DataSourceHealth, RiskLevel, RiskResult, SignalQuality};
