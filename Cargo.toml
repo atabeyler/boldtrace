@@ -6,6 +6,7 @@ members = [
     "score-engine",
     "backtest",
     "bot",
+    "product-api",
 ]
 
 [workspace.package]
