@@ -1,6 +1,6 @@
 import {useState} from 'react';import {Brand} from '../components/Brand';import {LanguageSelector} from '../components/LanguageSelector';import {Footer} from '../components/Footer';import {useI18n} from '../i18n';import {api,ApiError} from '../api/client';import type {Account} from '../api/contracts';import {sortedCountries} from '../countries';
 
-const ERROR_KEYS:Record<string,'errorInvalidInput'|'errorTermsRequired'|'errorEmailTaken'|'errorInvalidCredentials'|'errorServiceUnavailable'|'errorRateLimited'|'errorInvalidUserCode'|'errorUserCodeTaken'|'errorAccountPending'|'errorAccountRejected'>={
+const ERROR_KEYS:Record<string,'errorInvalidInput'|'errorTermsRequired'|'errorEmailTaken'|'errorInvalidCredentials'|'errorServiceUnavailable'|'errorRateLimited'|'errorInvalidUserCode'|'errorUserCodeTaken'|'errorAccountPending'|'errorAccountRejected'|'errorLocationMismatch'>={
   invalid_input:'errorInvalidInput',
   terms_not_accepted:'errorTermsRequired',
   email_taken:'errorEmailTaken',
@@ -11,7 +11,25 @@ const ERROR_KEYS:Record<string,'errorInvalidInput'|'errorTermsRequired'|'errorEm
   user_code_taken:'errorUserCodeTaken',
   account_pending:'errorAccountPending',
   account_rejected:'errorAccountRejected',
+  location_mismatch:'errorLocationMismatch',
 };
+
+/// Best-effort browser Geolocation read: resolves `null` (never rejects) on
+/// missing permission, no API support, or timeout, since this is only an
+/// informational signal attached to the login request, never a requirement.
+function currentPosition(timeoutMs=3000):Promise<{lat:number;lon:number}|null>{
+  return new Promise(resolve=>{
+    if(!('geolocation' in navigator)){resolve(null);return}
+    let settled=false;
+    const finish=(v:{lat:number;lon:number}|null)=>{if(!settled){settled=true;resolve(v)}};
+    const timer=setTimeout(()=>finish(null),timeoutMs);
+    navigator.geolocation.getCurrentPosition(
+      pos=>{clearTimeout(timer);finish({lat:pos.coords.latitude,lon:pos.coords.longitude})},
+      ()=>{clearTimeout(timer);finish(null)},
+      {timeout:timeoutMs},
+    );
+  });
+}
 
 export function AuthPage({onAuthenticated}:{onAuthenticated:(account:Account)=>void}){
   const{t,lang}=useI18n();
@@ -28,10 +46,13 @@ export function AuthPage({onAuthenticated}:{onAuthenticated:(account:Account)=>v
     const form=new FormData(e.currentTarget);
     try{
       if(mode==='login'){
+        const position=await currentPosition();
         const account=await api.login({
           email:String(form.get('email')||''),
           password:String(form.get('password')||''),
           rememberMe:form.get('rememberMe')==='on',
+          browserLat:position?.lat,
+          browserLon:position?.lon,
         });
         onAuthenticated(account);
       }else{

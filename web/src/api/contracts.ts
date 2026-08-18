@@ -7,6 +7,7 @@ export interface IntelligenceSnapshot{market:MarketDecision;performance:Performa
 export interface DecisionHistoryItem{id:string;symbol:string;decision:Decision;confidence:number;horizon:string;realizedReturn?:number;outcome?:'WIN'|'LOSS'|'PENDING';createdAt:string}
 export interface Account{id:string;userCode:string;email:string;firstName:string;lastName:string;language:string;status:'pending'|'approved'|'rejected';isAdmin:boolean}
 export interface PendingUser{id:string;userCode:string;email:string;firstName:string;lastName:string;country:string;nationalId:string;createdAt:string}
+export interface LocationAlert{id:string;email:string;firstName:string;lastName:string;expectedCountry:string;detectedCountry:string;ip:string;createdAt:string}
 export interface RegisterInput{firstName:string;lastName:string;userCode:string;country:string;nationalId:string;email:string;password:string;language:string;termsAccepted:boolean}
-export interface LoginInput{email:string;password:string;rememberMe:boolean}
+export interface LoginInput{email:string;password:string;rememberMe:boolean;browserLat?:number;browserLon?:number}
 export interface ApiErrorBody{error:string}

@@ -94,3 +94,32 @@ pub async fn notify_applicant_rejected(config: &EmailConfig, to: &str, first_nam
     );
     send(config, to, "Your BOLDTRACE account request", html).await;
 }
+
+#[allow(clippy::too_many_arguments)]
+pub async fn notify_admin_location_mismatch(
+    config: &EmailConfig,
+    first_name: &str,
+    last_name: &str,
+    email: &str,
+    expected_country: &str,
+    detected_country: &str,
+    ip: &str,
+) {
+    let Some(admin_email) = config.admin_email.clone() else {
+        tracing::info!("ADMIN_NOTIFICATION_EMAIL not set, skipping location alert");
+        return;
+    };
+    let html = format!(
+        "<p>A login attempt was blocked because the request's country didn't match \
+         the account's registered country.</p>\
+         <ul>\
+         <li><b>Name:</b> {first_name} {last_name}</li>\
+         <li><b>Email:</b> {email}</li>\
+         <li><b>Registered country:</b> {expected_country}</li>\
+         <li><b>Detected country:</b> {detected_country}</li>\
+         <li><b>IP:</b> {ip}</li>\
+         </ul>\
+         <p>If this is the account holder traveling, allow the login from the admin panel.</p>"
+    );
+    send(config, &admin_email, "BOLDTRACE: login blocked, country mismatch", html).await;
+}

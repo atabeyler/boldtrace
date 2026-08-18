@@ -7,7 +7,7 @@ use argon2::password_hash::rand_core::OsRng as PasswordOsRng;
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
 use axum_extra::extract::cookie::{Cookie, SameSite};
@@ -54,6 +54,8 @@ pub(crate) struct UserRow {
     pub(crate) language: String,
     pub(crate) status: String,
     pub(crate) is_admin: bool,
+    pub(crate) country: String,
+    pub(crate) location_override_until: Option<OffsetDateTime>,
 }
 
 impl From<UserRow> for AccountView {
@@ -72,7 +74,7 @@ impl From<UserRow> for AccountView {
 }
 
 const USER_ROW_COLUMNS: &str =
-    "id, user_code, email, first_name, last_name, password_hash, language, status, is_admin";
+    "id, user_code, email, first_name, last_name, password_hash, language, status, is_admin, country, location_override_until";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -98,6 +100,12 @@ pub struct LoginRequest {
     pub email: String,
     pub password: String,
     pub remember_me: Option<bool>,
+    /// Optional browser Geolocation API coordinates. Purely informational —
+    /// recorded alongside a location alert for the admin to see, never used
+    /// to enforce the country check itself since it's a client-supplied,
+    /// spoofable signal. The IP-derived country is what's enforced.
+    pub browser_lat: Option<f64>,
+    pub browser_lon: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -302,6 +310,7 @@ pub async fn register(
 pub async fn login(
     State(state): State<AppState>,
     jar: CookieJar,
+    headers: HeaderMap,
     Json(req): Json<LoginRequest>,
 ) -> impl IntoResponse {
     let pool = match require_pool(&state) {
@@ -349,6 +358,51 @@ pub async fn login(
         "pending" => return error(StatusCode::FORBIDDEN, "account_pending").into_response(),
         "rejected" => return error(StatusCode::FORBIDDEN, "account_rejected").into_response(),
         _ => {}
+    }
+
+    let has_override = row
+        .location_override_until
+        .map(|until| OffsetDateTime::now_utc() < until)
+        .unwrap_or(false);
+    if !has_override && !row.country.is_empty() {
+        if let Some(ip) = crate::geoip::client_ip(&headers) {
+            if let Some(detected) = crate::geoip::lookup_country(&ip).await {
+                if detected != row.country {
+                    let alert_id = random_hex(16);
+                    if let Err(err) = sqlx::query(
+                        "INSERT INTO login_location_alerts \
+                         (id, user_id, email, expected_country, detected_country, ip, browser_lat, browser_lon) \
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                    )
+                    .bind(&alert_id)
+                    .bind(&row.id)
+                    .bind(&row.email)
+                    .bind(&row.country)
+                    .bind(&detected)
+                    .bind(&ip)
+                    .bind(req.browser_lat)
+                    .bind(req.browser_lon)
+                    .execute(&pool)
+                    .await
+                    {
+                        tracing::warn!(error=%err, "failed to record login location alert");
+                    }
+                    crate::email::notify_admin_location_mismatch(
+                        &state.email,
+                        &row.first_name,
+                        &row.last_name,
+                        &row.email,
+                        &row.country,
+                        &detected,
+                        &ip,
+                    )
+                    .await;
+                    return error(StatusCode::FORBIDDEN, "location_mismatch").into_response();
+                }
+            }
+            // Lookup failed (provider down, etc.): fail open, proceed with login.
+        }
+        // No IP resolvable (e.g. local dev behind no proxy): fail open.
     }
 
     let token = match create_session(&pool, &row.id, remember_me).await {

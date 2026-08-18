@@ -2,6 +2,7 @@ mod adapter;
 mod admin;
 mod auth;
 mod email;
+mod geoip;
 mod history;
 mod live_store;
 mod rate_limit;
@@ -124,6 +125,8 @@ async fn main() {
         .route("/api/v1/admin/pending-users", get(admin::list_pending))
         .route("/api/v1/admin/users/:id/approve", post(admin::approve))
         .route("/api/v1/admin/users/:id/reject", post(admin::reject))
+        .route("/api/v1/admin/location-alerts", get(admin::list_location_alerts))
+        .route("/api/v1/admin/location-alerts/:id/allow", post(admin::allow_location))
         .with_state(state)
         .layer(TraceLayer::new_for_http());
 
