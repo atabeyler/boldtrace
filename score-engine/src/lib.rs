@@ -2,10 +2,12 @@
 //! function here takes data in and returns a value, with no network,
 //! filesystem, or database access.
 
+pub mod advanced;
 mod input;
 mod signals;
 mod weights;
 
+pub use advanced::{market_regime, market_structure, volatility, MarketRegime, RegimeResult, StructureResult, StructureState, VolatilityResult, VolatilityState};
 pub use input::ScoreInput;
 pub use weights::ScoreWeights;
 
