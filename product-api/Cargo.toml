@@ -10,9 +10,14 @@ serde.workspace = true
 serde_json.workspace = true
 shared = { path = "../shared" }
 score-engine = { path = "../score-engine" }
-axum = "0.7"
+axum = { version = "0.7", features = ["macros"] }
+axum-extra = { version = "0.9", features = ["cookie"] }
 redis = { version = "0.27", features = ["tokio-comp"] }
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "json"] }
-tower-http = { version = "0.6", features = ["cors", "trace"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros", "migrate", "time", "json"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+argon2 = "0.5"
+rand = "0.8"
+sha2 = "0.10"
+time = { version = "0.3", features = ["formatting", "parsing"] }
