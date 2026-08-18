@@ -1,0 +1,15 @@
+[package]
+name = "product-api"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+
+[dependencies]
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+shared = { path = "../shared" }
+axum = "0.7"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
