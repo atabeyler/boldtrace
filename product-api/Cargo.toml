@@ -12,7 +12,7 @@ shared = { path = "../shared" }
 score-engine = { path = "../score-engine" }
 axum = { version = "0.7", features = ["macros"] }
 axum-extra = { version = "0.9", features = ["cookie"] }
-redis = { version = "0.27", features = ["tokio-comp"] }
+redis = { version = "0.27", features = ["tokio-comp", "tokio-native-tls-comp"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros", "migrate", "time", "json"] }
 tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
 tracing = "0.1"
