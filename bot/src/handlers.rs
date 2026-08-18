@@ -3,10 +3,8 @@
 
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
-
 use crate::alarms::{AlarmRegistry, SmartAlertGate};
 use crate::commands::Command;
 use crate::consent;
@@ -15,26 +13,12 @@ use crate::market_state::MarketState;
 use crate::user_store::UserStore;
 
 #[derive(Clone)]
-pub struct AppState {
-    pub user_store: Arc<dyn UserStore>,
-    pub market_state: Arc<MarketState>,
-    pub alarms: Arc<AlarmRegistry>,
-    pub smart_alerts: Arc<SmartAlertGate>,
-}
-
-fn now_millis() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as i64
-}
-
-fn language_keyboard() -> InlineKeyboardMarkup {
-    let rows: Vec<Vec<InlineKeyboardButton>> = i18n::SUPPORTED_LANGUAGES.iter().map(|code| {
-        let label = i18n::t("en", &format!("language-name-{code}"));
-        vec![InlineKeyboardButton::callback(label, format!("lang:{code}"))]
-    }).collect();
-    InlineKeyboardMarkup::new(rows)
-}
-fn consent_keyboard(lang: &str) -> InlineKeyboardMarkup { InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(i18n::t(lang,"consent-accept-button"),"consent:accept")]]) }
-async fn send(bot:&Bot,chat_id:ChatId,lang:&str,body:&str,keyboard:Option<InlineKeyboardMarkup>){let text=i18n::with_footer(lang,body);let mut request=bot.send_message(chat_id,text);if let Some(keyboard)=keyboard{request=request.reply_markup(keyboard);}if let Err(err)=request.await{tracing::warn!(error=%err,"failed to send message");}}
+pub struct AppState { pub user_store: Arc<dyn UserStore>, pub market_state: Arc<MarketState>, pub alarms: Arc<AlarmRegistry>, pub smart_alerts: Arc<SmartAlertGate> }
+fn now_millis()->i64{SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as i64}
+fn language_keyboard()->InlineKeyboardMarkup{let rows:Vec<Vec<InlineKeyboardButton>>=i18n::SUPPORTED_LANGUAGES.iter().map(|code|{let label=i18n::t("en",&format!("language-name-{code}"));vec![InlineKeyboardButton::callback(label,format!("lang:{code}"))]}).collect();InlineKeyboardMarkup::new(rows)}
+fn consent_keyboard(lang:&str)->InlineKeyboardMarkup{InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(i18n::t(lang,"consent-accept-button"),"consent:accept")]])}
+async fn send(bot:&Bot,chat_id:ChatId,lang:&str,body:&str,keyboard:Option<InlineKeyboardMarkup>){let text=i18n::with_footer(lang,body);let mut request=bot.send_message(chat_id,text);if let Some(keyboard)=keyboard{request=request.reply_markup(keyboard);}
+if let Err(err)=request.await{tracing::warn!(error=%err,"failed to send message");}}
 async fn resolved_language(state:&AppState,telegram_id:i64,telegram_language_code:Option<&str>)->String{match state.user_store.get(telegram_id).await{Some(user)=>user.language,None=>i18n::normalize_language(telegram_language_code)}}
 async fn send_consent_screen(bot:&Bot,chat_id:ChatId,lang:&str){let body=format!("{}\n\n{}",i18n::t(lang,"consent-title"),i18n::t(lang,"consent-body"));send(bot,chat_id,lang,&body,Some(consent_keyboard(lang))).await;}
 pub async fn message_handler(bot:Bot,msg:Message,cmd:Command,state:AppState)->ResponseResult<()>{let chat_id=msg.chat.id;let telegram_id=chat_id.0;let telegram_lang_code=msg.from.as_ref().and_then(|u|u.language_code.as_deref());let lang=resolved_language(&state,telegram_id,telegram_lang_code).await;if !matches!(cmd,Command::Start){let user=state.user_store.get(telegram_id).await;if !consent::has_current_consent(user.as_ref()){send_consent_screen(&bot,chat_id,&lang).await;return Ok(());}}match cmd{Command::Start=>handle_start(&bot,chat_id,&state,&lang).await,Command::Help=>handle_help(&bot,chat_id,&lang).await,Command::Language=>send(&bot,chat_id,&lang,&i18n::t(&lang,"language-prompt"),Some(language_keyboard())).await,Command::Tara(symbol)=>handle_tara(&bot,chat_id,&state,&lang,symbol).await,Command::Alarm{symbol,threshold}=>handle_alarm(&bot,chat_id,telegram_id,&state,&lang,symbol,threshold).await}Ok(())}
