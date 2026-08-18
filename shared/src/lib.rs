@@ -40,6 +40,14 @@ pub struct FundingRate {
     pub rate: f64,
 }
 
+/// An open-interest observation for a perpetual futures symbol.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenInterest {
+    pub symbol: String,
+    pub timestamp: i64,
+    pub value: f64,
+}
+
 /// A composite score produced by the score engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Score {

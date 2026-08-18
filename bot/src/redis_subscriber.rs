@@ -1,68 +1,12 @@
-//! Bridges exchange-client's Redis publications into `MarketState`, and
-//! notifies users the moment a registered `/alarm` threshold is crossed.
-
-use futures_util::StreamExt;
-use teloxide::prelude::*;
-use teloxide::types::ChatId;
-
-use crate::handlers::AppState;
-use crate::i18n;
-
-pub async fn run(redis_url: String, bot: Bot, state: AppState) -> redis::RedisResult<()> {
-    let client = redis::Client::open(redis_url)?;
-    let mut pubsub = client.get_async_pubsub().await?;
-    pubsub.psubscribe("candles:*").await?;
-    pubsub.psubscribe("orderbook:*").await?;
-    pubsub.psubscribe("funding:*").await?;
-
-    let mut messages = pubsub.on_message();
-    while let Some(message) = messages.next().await {
-        let channel = message.get_channel_name().to_string();
-        let Ok(payload) = message.get_payload::<String>() else {
-            continue;
-        };
-
-        let score = if let Some(_symbol_interval) = channel.strip_prefix("candles:") {
-            serde_json::from_str::<shared::Candle>(&payload)
-                .ok()
-                .and_then(|candle| state.market_state.ingest_candle(candle))
-        } else if channel.strip_prefix("orderbook:").is_some() {
-            serde_json::from_str::<shared::OrderBookSnapshot>(&payload)
-                .ok()
-                .and_then(|snapshot| state.market_state.ingest_order_book(snapshot))
-        } else if channel.strip_prefix("funding:").is_some() {
-            serde_json::from_str::<shared::FundingRate>(&payload)
-                .ok()
-                .and_then(|rate| state.market_state.ingest_funding_rate(rate))
-        } else {
-            None
-        };
-
-        let Some(score) = score else { continue };
-        for (telegram_id, threshold) in state.alarms.crossed(&score.symbol, score.value) {
-            notify_alarm(&bot, &state, telegram_id, &score, threshold).await;
-        }
-    }
-
-    Ok(())
-}
-
-async fn notify_alarm(bot: &Bot, state: &AppState, telegram_id: i64, score: &shared::Score, threshold: f64) {
-    let lang = match state.user_store.get(telegram_id).await {
-        Some(user) => user.language,
-        None => "en".to_string(),
-    };
-    let body = i18n::t_args(
-        &lang,
-        "alarm-triggered",
-        &[
-            ("symbol", score.symbol.clone()),
-            ("threshold", format!("{:.1}", threshold)),
-            ("score", format!("{:.1}", score.value)),
-        ],
-    );
-    let text = i18n::with_footer(&lang, &body);
-    if let Err(err) = bot.send_message(ChatId(telegram_id), text).await {
-        tracing::warn!(error = %err, "failed to send alarm notification");
-    }
-}
+//! Bridges exchange-client Redis publications into live market state.
+use futures_util::StreamExt;use score_engine::{calibrate_confidence,Decision,PerformanceFeedback};use std::time::{SystemTime,UNIX_EPOCH};use teloxide::prelude::*;use teloxide::types::ChatId;use crate::alarms::AlertPolicy;use crate::handlers::AppState;use crate::i18n;use crate::market_state::SpecializedSnapshot;
+fn now_millis()->i64{SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as i64}
+pub async fn run(redis_url:String,bot:Bot,state:AppState)->redis::RedisResult<()>{let client=redis::Client::open(redis_url)?;let mut pubsub=client.get_async_pubsub().await?;pubsub.psubscribe("candles:*").await?;pubsub.psubscribe("orderbook:*").await?;pubsub.psubscribe("funding:*").await?;pubsub.psubscribe("open_interest:*").await?;let mut messages=pubsub.on_message();while let Some(message)=messages.next().await{let channel=message.get_channel_name().to_string();let Ok(payload)=message.get_payload::<String>()else{continue};let candle=if channel.starts_with("candles:"){serde_json::from_str::<shared::Candle>(&payload).ok()}else{None};if let Some(c)=candle.as_ref(){let outcomes=state.outcome_tracker.evaluate_price(&c.symbol,c.close,c.close_time);let mut learned=false;for outcome in outcomes{if let Some(ledger)=state.decision_ledger.as_ref(){if let Err(err)=ledger.append_outcome(&outcome).await{tracing::warn!(error=%err,symbol=%outcome.symbol,horizon=outcome.horizon_minutes,"failed to persist decision outcome");}else if outcome.horizon_minutes==60{learned=true;}}tracing::info!(symbol=%outcome.symbol,horizon=outcome.horizon_minutes,correct=outcome.correct,directional_return=outcome.directional_return_pct,"decision outcome evaluated");}if learned{refresh_adaptive_weights(&state,&c.symbol).await;}}
+let score=if let Some(x)=candle{state.market_state.ingest_candle(x)}else if channel.starts_with("orderbook:"){serde_json::from_str::<shared::OrderBookSnapshot>(&payload).ok().and_then(|x|state.market_state.ingest_order_book(x))}else if channel.starts_with("funding:"){serde_json::from_str::<shared::FundingRate>(&payload).ok().and_then(|x|state.market_state.ingest_funding_rate(x))}else if channel.starts_with("open_interest:"){serde_json::from_str::<shared::OpenInterest>(&payload).ok().and_then(|x|state.market_state.ingest_open_interest(x))}else{None};let Some(score)=score else{continue};for(telegram_id,threshold)in state.alarms.crossed(&score.symbol,score.value){notify_alarm(&bot,&state,telegram_id,&score,threshold).await;}if let Some(snapshot)=state.market_state.intelligence(&score.symbol){state.decision_history.push(&snapshot);let(calibrated,policy)=calibration_and_policy(&state,&snapshot).await;let specialized=state.market_state.specialized(&snapshot.symbol,snapshot.decision.decision);if let Some(ledger)=state.decision_ledger.as_ref(){if let Err(err)=ledger.append(&snapshot).await{tracing::warn!(error=%err,symbol=%snapshot.symbol,"failed to persist intelligence decision");}}let mut decision=snapshot.decision;decision.confidence=calibrated;if let Some(s)=specialized{apply_specialized_gate(&mut decision,s);}
+if let Some(price)=state.market_state.latest_price(&snapshot.symbol){state.outcome_tracker.register(&snapshot.symbol,decision.decision,snapshot.timestamp,price);}
+if let Some(alert)=state.smart_alerts.evaluate_with_policy(&snapshot.symbol,&decision,now_millis(),policy){for telegram_id in state.alarms.subscribers(&snapshot.symbol){notify_smart_alert(&bot,&state,telegram_id,&snapshot,&decision,specialized,policy).await;}tracing::info!(symbol=%alert.symbol,decision=?alert.decision,confidence=alert.confidence,risk=alert.risk,"adaptive smart intelligence alert delivered");}}}Ok(())}
+async fn refresh_adaptive_weights(state:&AppState,symbol:&str){let Some(ledger)=state.decision_ledger.as_ref()else{return;};match ledger.signal_reliability(symbol,500).await{Ok(r)=>{let w=state.market_state.apply_reliability(symbol,r);tracing::info!(symbol,samples=r.samples,volume_reliability=r.volume,funding_reliability=r.funding,order_book_reliability=r.order_book,rsi_reliability=r.rsi,volume_weight=w.volume_anomaly,funding_weight=w.funding_extreme,order_book_weight=w.order_book_imbalance,rsi_weight=w.rsi_divergence,"adaptive weights refreshed from realized outcomes");}Err(err)=>tracing::warn!(error=%err,symbol,"failed to refresh adaptive weights")}}
+fn apply_specialized_gate(decision:&mut score_engine::MetaDecision,s:SpecializedSnapshot){if s.conflict.force_no_trade{decision.decision=Decision::NoTrade;decision.confidence=decision.confidence.min(50.0);return;}let risk_penalty=s.shock.score*0.18+s.derivatives_stress.score*0.22;decision.risk=(decision.risk+risk_penalty).clamp(0.0,100.0);if s.shock.score>=85.0||s.derivatives_stress.score>=90.0{decision.decision=Decision::NoTrade;decision.confidence=decision.confidence.min(55.0);}}
+async fn calibration_and_policy(state:&AppState,snapshot:&score_engine::IntelligenceSnapshot)->(f64,AlertPolicy){let Some(ledger)=state.decision_ledger.as_ref()else{return(snapshot.decision.confidence,AlertPolicy::default());};let baseline=ledger.performance(&snapshot.symbol,200).await.ok().flatten();let outcome15=ledger.outcome_performance(&snapshot.symbol,15,200).await.ok().flatten();let outcome60=ledger.outcome_performance(&snapshot.symbol,60,200).await.ok().flatten();let outcome240=ledger.outcome_performance(&snapshot.symbol,240,100).await.ok().flatten();let mut confidence=if let Some(p)=baseline.as_ref(){calibrate_confidence(snapshot.decision.confidence,PerformanceFeedback{samples:p.samples,avg_confidence:p.avg_confidence,avg_risk:p.avg_risk,avg_data_quality:p.avg_data_quality,avg_agreement:p.avg_agreement}).calibrated_confidence}else{snapshot.decision.confidence};let mut weighted_win=0.0;let mut weight=0.0;let mut realized_samples=0usize;for(p,w)in [(outcome15.as_ref(),0.25),(outcome60.as_ref(),0.45),(outcome240.as_ref(),0.30)]{if let Some(p)=p{if p.samples>=10{weighted_win+=p.win_rate*w;weight+=w;realized_samples+=p.samples;}}}if weight>0.0{let win_rate=weighted_win/weight;let reliability=((realized_samples as f64)/150.0).clamp(0.0,1.0);let adjustment=((win_rate-50.0)*0.35*reliability).clamp(-15.0,15.0);confidence=(confidence+adjustment).clamp(0.0,100.0);}let policy=if let Some(p)=baseline{AlertPolicy::adaptive(p.samples,p.avg_risk,p.avg_data_quality,p.avg_agreement)}else{AlertPolicy::default()};(confidence,policy)}
+async fn notify_alarm(bot:&Bot,state:&AppState,telegram_id:i64,score:&shared::Score,threshold:f64){let lang=match state.user_store.get(telegram_id).await{Some(user)=>user.language,None=>"en".into()};let body=i18n::t_args(&lang,"alarm-triggered",&[("symbol",score.symbol.clone()),("threshold",format!("{:.1}",threshold)),("score",format!("{:.1}",score.value))]);if let Err(err)=bot.send_message(ChatId(telegram_id),i18n::with_footer(&lang,&body)).await{tracing::warn!(error=%err,"failed to send alarm notification");}}
+async fn notify_smart_alert(bot:&Bot,state:&AppState,telegram_id:i64,snapshot:&score_engine::IntelligenceSnapshot,decision:&score_engine::MetaDecision,specialized:Option<SpecializedSnapshot>,policy:AlertPolicy){let lang=match state.user_store.get(telegram_id).await{Some(user)=>user.language,None=>"en".into()};let reasons=if snapshot.explanation.reasons.is_empty(){"-".into()}else{snapshot.explanation.reasons.join(", ")};let warnings=if snapshot.explanation.warnings.is_empty(){"-".into()}else{snapshot.explanation.warnings.join(", ")};let weights=state.market_state.adaptive_weights(&snapshot.symbol);let extra=specialized.map(|s|format!("\nSweep: {:.1} {:?}\nShock: {:.1}\nDerivatives stress: {:.1}\nConflict: {:.1}\nRegime transition: {:.1}\nCross-market divergence: {:.1}",s.sweep.score,s.sweep.side,s.shock.score,s.derivatives_stress.score,s.conflict.score,s.regime_transition.score,s.cross_market.score)).unwrap_or_default();let body=format!("BOLDTRACE Intelligence — {}\nDecision: {:?}\nConfidence: {:.1} (raw {:.1})\nRisk: {:.1}\nScore: {:.1}\nData quality: {:.1}\nAdaptive weights V/F/OB/RSI: {:.2}/{:.2}/{:.2}/{:.2}\nPolicy: conf ≥ {:.1}, risk < {:.1}{}\nReasons: {}\nWarnings: {}",snapshot.symbol,decision.decision,decision.confidence,snapshot.decision.confidence,decision.risk,snapshot.score,snapshot.data_quality,weights.volume_anomaly,weights.funding_extreme,weights.order_book_imbalance,weights.rsi_divergence,policy.min_confidence,policy.max_risk,extra,reasons,warnings);if let Err(err)=bot.send_message(ChatId(telegram_id),i18n::with_footer(&lang,&body)).await{tracing::warn!(error=%err,telegram_id,"failed to send smart intelligence alert");}}
