@@ -2,6 +2,7 @@ mod adapter;
 mod auth;
 mod history;
 mod live_store;
+mod rate_limit;
 mod state;
 
 use axum::extract::{Path, State};
@@ -91,7 +92,12 @@ async fn main() {
         .map(|v| v != "false")
         .unwrap_or(true);
 
-    let state = AppState { live, pool, secure_cookies };
+    let state = AppState {
+        live,
+        pool,
+        secure_cookies,
+        auth_rate_limiter: std::sync::Arc::new(rate_limit::RateLimiter::default()),
+    };
 
     let cors = env::var("WEB_ORIGIN").ok().map(|origin| {
         let origin: axum::http::HeaderValue = origin

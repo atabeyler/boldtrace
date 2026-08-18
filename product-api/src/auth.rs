@@ -18,12 +18,17 @@ use serde::{Deserialize, Serialize};
 use crate::state::AppState;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
+use std::time::Duration as StdDuration;
 use time::{Duration, OffsetDateTime};
 
 pub const TERMS_VERSION: &str = "2026-08-18";
 const SESSION_COOKIE: &str = "bt_session";
 const REMEMBER_DAYS: i64 = 30;
 const DEFAULT_SESSION_HOURS: i64 = 12;
+const LOGIN_MAX_ATTEMPTS: usize = 8;
+const LOGIN_WINDOW: StdDuration = StdDuration::from_secs(15 * 60);
+const REGISTER_MAX_ATTEMPTS: usize = 5;
+const REGISTER_WINDOW: StdDuration = StdDuration::from_secs(60 * 60);
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -178,6 +183,12 @@ pub async fn register(
         Err(err) => return err.into_response(),
     };
     let email = req.email.trim().to_lowercase();
+    if !state
+        .auth_rate_limiter
+        .check(&format!("register:{email}"), REGISTER_MAX_ATTEMPTS, REGISTER_WINDOW)
+    {
+        return error(StatusCode::TOO_MANY_REQUESTS, "rate_limited").into_response();
+    }
     let first_name = req.first_name.trim().to_string();
     let last_name = req.last_name.trim().to_string();
     if email.is_empty()
@@ -271,6 +282,12 @@ pub async fn login(
         Err(err) => return err.into_response(),
     };
     let email = req.email.trim().to_lowercase();
+    if !state
+        .auth_rate_limiter
+        .check(&format!("login:{email}"), LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW)
+    {
+        return error(StatusCode::TOO_MANY_REQUESTS, "rate_limited").into_response();
+    }
     let remember_me = req.remember_me.unwrap_or(false);
     let row = sqlx::query_as::<_, UserRow>(
         "SELECT id, user_code, email, first_name, last_name, password_hash, language FROM web_users WHERE email = $1",

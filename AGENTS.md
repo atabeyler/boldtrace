@@ -5,14 +5,14 @@ BOLDTRACE is a multilingual market-intelligence platform. It ingests live exchan
 
 BOLDTRACE is an information and statistical screening product. It does not promise returns and must never present probabilistic output as guaranteed investment advice.
 
-## Cardinal Rules
+## Non-Negotiable Rules
 1. Never fabricate live market data, confidence, risk, performance, engine state, health, or outcomes. UI values must come from real backend state; unavailable data is shown as unavailable/warming-up.
 2. Risk Guardian has final veto. No presentation layer may bypass a `NO TRADE`/safety decision.
 3. Adaptive learning may tune bounded weights only from persisted realized outcomes. No self-modification without evidence, sample-size gates, and bounds.
 4. User-facing text must be localized. No hardcoded production UI copy.
 5. Authentication, consent, session handling, and authorization are server-enforced. Client-side route guards are UX, never the security boundary.
 6. Secrets never enter source control, logs, browser bundles, or analytics.
-7. Productization work stays on `agent/productization-v1`. Do not open PRs and do not modify `main`; the owner performs final merge/push workflow.
+7. All work happens directly on `main`, gated by CI (`cargo build`/`test`/`clippy -D warnings` for Rust, `tsc`/`vite build` for web). Never leave `main` red — fix a CI failure before starting new work, or say plainly what's blocking the fix.
 
 ## Architecture
 - `shared` — common market/domain types.
@@ -20,13 +20,13 @@ BOLDTRACE is an information and statistical screening product. It does not promi
 - `score-engine` — pure deterministic scoring, market intelligence, specialized engines, confidence calibration, adaptive weights.
 - `backtest` — historical validation.
 - `bot` — Telegram delivery, consent, alerts, persistence integration.
-- `migrations` — PostgreSQL schema.
+- `migrations` — PostgreSQL schema (Telegram accounts, web accounts/sessions, decision ledger/outcomes).
 - `locales` — Fluent localization resources.
-- `web` — product web client (React + TypeScript + Vite), created during productization.
-- `api` — product HTTP/WebSocket API boundary, created during productization.
+- `web` — product web client (React + TypeScript + Vite): six-language auth, Command Center, Intelligence Terminal, Engine Matrix, Performance/Learning/Alert Centers, Market Scanner, History, System Health, Settings.
+- `product-api` — versioned HTTP API under `/api/v1` (auth, intelligence, history, health), backed by PostgreSQL and Redis; serves the built `web` app as static files from the same origin in production so no cross-site cookie/CORS setup is needed.
 
 Target runtime flow:
-`Exchange -> validation/data health -> MarketState -> score/intelligence -> Risk Guardian -> outcome/adaptive learning -> PostgreSQL -> API -> Web + Telegram`.
+`Exchange -> validation/data health -> MarketState -> score/intelligence -> Risk Guardian -> outcome/adaptive learning -> PostgreSQL -> product-api -> Web + Telegram`.
 
 ## Product Surfaces
 The V1 web product contains: Command Center, Intelligence Terminal, Engine Matrix, Performance Center, Learning Center, Alert Center, Market Scanner, System Health, account/settings, login and registration.
@@ -93,7 +93,7 @@ Footer includes `BOLDTRACE © 2026`, company name, localized “All rights reser
 - Stale or missing required data reduces quality and can force NoTrade.
 
 ## API Contract
-Expose versioned product endpoints under `/api/v1`. Planned surfaces include markets, symbol intelligence, engines, performance, history, alerts, account/session, and health. Use typed response DTOs; never expose internal database rows directly. Real-time updates use a controlled WebSocket/SSE channel with reconnect/backoff and freshness timestamps.
+Expose versioned product endpoints under `/api/v1`. Surfaces: `auth` (register/login/logout/me), `intelligence/:symbol`, `history`, `health`. Planned: engines, performance, alerts. Use typed response DTOs; never expose internal database rows directly. Real-time updates use a controlled WebSocket/SSE channel with reconnect/backoff and freshness timestamps.
 
 ## Data Health
 Track freshness independently for candle, order book, funding, open interest, Redis, PostgreSQL and exchange connectivity. Aggregate state is one of `HEALTHY`, `WARMING_UP`, `DEGRADED`, `OFFLINE`. Health status is observable via API and UI and participates in Risk Guardian decisions.
@@ -110,7 +110,10 @@ Track freshness independently for candle, order book, funding, open interest, Re
 ## Testing & Completion
 A feature is complete when its domain logic, API contract, localization, loading/error/empty states, mobile behavior and relevant tests exist. Tests must cover risk vetoes, auth authorization boundaries, locale fallback/RTL, data freshness, outcome learning bounds, and critical API DTOs.
 
-CI may be handled separately by the repository owner during this productization cycle; do not stop feature work merely to manage CI workflows unless explicitly asked. Do not knowingly leave syntax/type errors in touched code.
+CI is live (GitHub Actions, `rust` and `web` jobs) and gates `main`. Keep it green: reproduce a failure locally before pushing a fix, and don't leave `main` red between sessions. Do not knowingly leave syntax/type errors in touched code.
+
+## Deployment
+BOLDTRACE runs on Northflank. The repository's `Dockerfile` is a single multi-stage build with one final stage per deployable service — `bot`, `exchange-client`, `backtest`, `product-api` — selected via Northflank's build-target setting. See `NORTHFLANK.md` for the exact service/env-var setup.
 
 ## Reference Product
-`atabeyler/anatolia.bold.sim` is the design/interaction reference for agent instructions, login/register presentation, multilingual patterns and shared footer treatment. BOLDTRACE must adapt those patterns to financial-market intelligence rather than copying simulation-specific domain concepts.
+`atabeyler/anatolia.bold.sim` is the design/interaction reference for authentication, registration, localization, visual language and shared footer treatment. `atabeyler/anatolia.bold.q` is the reference for the application shell: dashboard layout, sidebar navigation, notifications, profile/session menu and settings patterns. Both are reference material only (see `reference/source-archives/`) — BOLDTRACE adapts those interaction patterns to financial-market intelligence rather than copying simulation-specific domain concepts, terminology, or visuals.

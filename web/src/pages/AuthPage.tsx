@@ -1,11 +1,12 @@
 import {useState} from 'react';import {Brand} from '../components/Brand';import {LanguageSelector} from '../components/LanguageSelector';import {Footer} from '../components/Footer';import {useI18n} from '../i18n';import {api,ApiError} from '../api/client';import type {Account} from '../api/contracts';
 
-const ERROR_KEYS:Record<string,'errorInvalidInput'|'errorTermsRequired'|'errorEmailTaken'|'errorInvalidCredentials'|'errorServiceUnavailable'>={
+const ERROR_KEYS:Record<string,'errorInvalidInput'|'errorTermsRequired'|'errorEmailTaken'|'errorInvalidCredentials'|'errorServiceUnavailable'|'errorRateLimited'>={
   invalid_input:'errorInvalidInput',
   terms_not_accepted:'errorTermsRequired',
   email_taken:'errorEmailTaken',
   invalid_credentials:'errorInvalidCredentials',
   database_unavailable:'errorServiceUnavailable',
+  rate_limited:'errorRateLimited',
 };
 
 export function AuthPage({onAuthenticated}:{onAuthenticated:(account:Account)=>void}){
