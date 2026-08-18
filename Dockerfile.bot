@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1
+#
+# Standalone single-target build for the `bot` service. Render (unlike
+# Northflank) has no way to select a stage from a multi-stage Dockerfile via
+# its API/dashboard, so each Render service that isn't the last stage of the
+# main `Dockerfile` gets its own file here instead.
+
+FROM rust:1-slim-bookworm AS builder
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . .
+RUN cargo build --release -p bot
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+ENV RUST_LOG=info
+COPY --from=builder /app/target/release/bot /usr/local/bin/bot
+CMD ["bot"]

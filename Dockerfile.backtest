@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1
+#
+# Standalone single-target build for the `backtest` service. See
+# Dockerfile.bot for why this exists separately from the main Dockerfile.
+
+FROM rust:1-slim-bookworm AS builder
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . .
+RUN cargo build --release -p backtest
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+ENV RUST_LOG=info
+COPY --from=builder /app/target/release/backtest /usr/local/bin/backtest
+CMD ["backtest"]
