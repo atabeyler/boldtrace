@@ -84,3 +84,24 @@ pub struct Session {
     pub telegram_id: i64,
     pub started_at: i64,
 }
+
+/// Transport-neutral snapshot published by the intelligence runtime for product surfaces.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiveIntelligence {
+    pub symbol: String,
+    pub timestamp: i64,
+    pub price: f64,
+    pub score: Score,
+    pub decision: String,
+    pub confidence: f64,
+    pub risk: f64,
+    pub data_quality: f64,
+    pub agreement: f64,
+    pub regime: String,
+    pub volume_weight: f64,
+    pub funding_weight: f64,
+    pub order_book_weight: f64,
+    pub rsi_weight: f64,
+    pub reasons: Vec<String>,
+    pub warnings: Vec<String>,
+}
