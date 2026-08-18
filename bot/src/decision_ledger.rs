@@ -1,39 +1,7 @@
-use score_engine::IntelligenceSnapshot;
-use serde_json::json;
-use sqlx::PgPool;
-
-#[derive(Clone)]
-pub struct DecisionLedger { pool: PgPool }
-
-impl DecisionLedger {
-    pub fn new(pool: PgPool) -> Self { Self { pool } }
-
-    pub async fn append(&self, snapshot: &IntelligenceSnapshot) -> Result<(), sqlx::Error> {
-        let rationale = if snapshot.explanation.reasons.is_empty() {
-            snapshot.explanation.headline.clone()
-        } else {
-            snapshot.explanation.reasons.join("; ")
-        };
-        let metadata = json!({
-            "signal_quality": snapshot.decision.signal_quality,
-            "risk": snapshot.decision.risk,
-            "data_quality": snapshot.data_quality,
-            "agreement": snapshot.agreement,
-            "derivatives_score": snapshot.derivatives_score,
-            "warnings": snapshot.explanation.warnings,
-            "headline": snapshot.explanation.headline,
-            "engine": "boldtrace-intelligence-v2"
-        });
-        sqlx::query("INSERT INTO decision_ledger (symbol, score, decision, rationale, confidence, decided_at_millis, metadata) VALUES ($1,$2,$3,$4,$5,$6,$7)")
-            .bind(&snapshot.symbol)
-            .bind(snapshot.score)
-            .bind(format!("{:?}", snapshot.decision.decision))
-            .bind(rationale)
-            .bind(snapshot.decision.confidence)
-            .bind(snapshot.timestamp)
-            .bind(metadata)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-}
+use score_engine::IntelligenceSnapshot;use serde_json::{json,Value};use sqlx::{FromRow,PgPool};
+#[derive(Debug,Clone,FromRow)]pub struct LedgerRecord{pub symbol:String,pub score:f64,pub decision:String,pub rationale:String,pub confidence:f64,pub decided_at_millis:i64,pub metadata:Value}
+#[derive(Debug,Clone,PartialEq)]pub struct DecisionPerformance{pub samples:usize,pub avg_score:f64,pub avg_confidence:f64,pub avg_risk:f64,pub avg_data_quality:f64,pub avg_agreement:f64}
+#[derive(Clone)]pub struct DecisionLedger{pool:PgPool}
+impl DecisionLedger{pub fn new(pool:PgPool)->Self{Self{pool}}pub async fn append(&self,s:&IntelligenceSnapshot)->Result<(),sqlx::Error>{let rationale=if s.explanation.reasons.is_empty(){s.explanation.headline.clone()}else{s.explanation.reasons.join("; ")};let metadata=json!({"signal_quality":s.decision.signal_quality,"risk":s.decision.risk,"data_quality":s.data_quality,"agreement":s.agreement,"derivatives_score":s.derivatives_score,"warnings":s.explanation.warnings,"headline":s.explanation.headline,"engine":"boldtrace-intelligence-v2"});sqlx::query("INSERT INTO decision_ledger (symbol,score,decision,rationale,confidence,decided_at_millis,metadata) VALUES ($1,$2,$3,$4,$5,$6,$7)").bind(&s.symbol).bind(s.score).bind(format!("{:?}",s.decision.decision)).bind(rationale).bind(s.decision.confidence).bind(s.timestamp).bind(metadata).execute(&self.pool).await?;Ok(())}
+pub async fn replay(&self,symbol:&str,limit:i64)->Result<Vec<LedgerRecord>,sqlx::Error>{sqlx::query_as::<_,LedgerRecord>("SELECT symbol,score,decision,rationale,confidence,decided_at_millis,metadata FROM decision_ledger WHERE symbol=$1 ORDER BY decided_at_millis DESC LIMIT $2").bind(symbol).bind(limit.clamp(1,1000)).fetch_all(&self.pool).await}
+pub async fn performance(&self,symbol:&str,limit:i64)->Result<Option<DecisionPerformance>,sqlx::Error>{let rows=self.replay(symbol,limit).await?;if rows.is_empty(){return Ok(None);}let n=rows.len() as f64;let mut score=0.0;let mut confidence=0.0;let mut risk=0.0;let mut quality=0.0;let mut agreement=0.0;for r in &rows{score+=r.score;confidence+=r.confidence;risk+=r.metadata.get("risk").and_then(Value::as_f64).unwrap_or(0.0);quality+=r.metadata.get("data_quality").and_then(Value::as_f64).unwrap_or(0.0);agreement+=r.metadata.get("agreement").and_then(Value::as_f64).unwrap_or(0.0);}Ok(Some(DecisionPerformance{samples:rows.len(),avg_score:score/n,avg_confidence:confidence/n,avg_risk:risk/n,avg_data_quality:quality/n,avg_agreement:agreement/n}))}}
