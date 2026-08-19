@@ -9,9 +9,12 @@ export interface ScannerEntry{symbol:string;status:'live'|'unavailable';market:M
 export interface AlertItem{id:string;severity:'CRITICAL'|'HIGH'|'WATCH'|'INFO';symbol:string;decision:Decision|string;confidence:number;createdAt:string}
 export interface EngineReliability{name:string;reliability:number}
 export interface LearningState{samples:number;minSampleGate:number;weightMin:number;weightMax:number;engines:EngineReliability[]}
-export interface Account{id:string;userCode:string;email:string;firstName:string;lastName:string;language:string;status:'pending'|'approved'|'rejected';isAdmin:boolean}
+export interface Account{id:string;userCode:string;email:string;firstName:string;lastName:string;language:string;status:'pending'|'approved'|'rejected';isAdmin:boolean;country:string;nationalId:string}
 export interface PendingUser{id:string;userCode:string;email:string;firstName:string;lastName:string;country:string;nationalId:string;createdAt:string}
 export interface LocationAlert{id:string;email:string;firstName:string;lastName:string;expectedCountry:string;detectedCountry:string;ip:string;createdAt:string}
+export interface AdminUser{id:string;userCode:string;email:string;firstName:string;lastName:string;country:string;nationalId:string;status:'pending'|'approved'|'rejected';isAdmin:boolean;createdAt:string}
 export interface RegisterInput{firstName:string;lastName:string;userCode:string;country:string;nationalId:string;email:string;password:string;language:string;termsAccepted:boolean}
 export interface LoginInput{identifier:string;password:string;rememberMe:boolean;browserLat?:number;browserLon?:number}
+export interface ProfileUpdateInput{firstName:string;lastName:string;userCode:string;country:string;nationalId:string}
+export interface PasswordChangeInput{currentPassword:string;newPassword:string}
 export interface ApiErrorBody{error:string}

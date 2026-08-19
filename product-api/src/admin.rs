@@ -248,3 +248,76 @@ pub async fn allow_location(
     }
     StatusCode::NO_CONTENT.into_response()
 }
+
+/// Every field an admin can legitimately see about an account. Password is
+/// never included: it's Argon2-hashed (one-way — there is no plaintext to
+/// show even in principle), and exposing the hash itself would be a real
+/// security regression for no operational benefit.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminUserView {
+    pub id: String,
+    pub user_code: String,
+    pub email: String,
+    pub first_name: String,
+    pub last_name: String,
+    pub country: String,
+    pub national_id: String,
+    pub status: String,
+    pub is_admin: bool,
+    pub created_at: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct AdminUserRow {
+    id: String,
+    user_code: String,
+    email: String,
+    first_name: String,
+    last_name: String,
+    country: String,
+    national_id: String,
+    status: String,
+    is_admin: bool,
+    created_at: time::OffsetDateTime,
+}
+
+impl From<AdminUserRow> for AdminUserView {
+    fn from(r: AdminUserRow) -> Self {
+        Self {
+            id: r.id,
+            user_code: r.user_code,
+            email: r.email,
+            first_name: r.first_name,
+            last_name: r.last_name,
+            country: r.country,
+            national_id: r.national_id,
+            status: r.status,
+            is_admin: r.is_admin,
+            created_at: r
+                .created_at
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_default(),
+        }
+    }
+}
+
+pub async fn list_all_users(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
+    let pool = match require_admin(&state, &jar).await {
+        Ok(pool) => pool,
+        Err(resp) => return resp,
+    };
+    let rows = sqlx::query_as::<_, AdminUserRow>(
+        "SELECT id, user_code, email, first_name, last_name, country, national_id, status, is_admin, created_at \
+         FROM web_users ORDER BY created_at DESC",
+    )
+    .fetch_all(&pool)
+    .await;
+    match rows {
+        Ok(rows) => Json(rows.into_iter().map(AdminUserView::from).collect::<Vec<_>>()).into_response(),
+        Err(err) => {
+            tracing::warn!(error=%err, "failed to list all users");
+            error(StatusCode::INTERNAL_SERVER_ERROR, "list_failed").into_response()
+        }
+    }
+}

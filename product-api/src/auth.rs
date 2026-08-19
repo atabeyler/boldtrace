@@ -41,6 +41,8 @@ pub struct AccountView {
     pub language: String,
     pub status: String,
     pub is_admin: bool,
+    pub country: String,
+    pub national_id: String,
 }
 
 #[derive(sqlx::FromRow)]
@@ -55,6 +57,7 @@ pub(crate) struct UserRow {
     pub(crate) status: String,
     pub(crate) is_admin: bool,
     pub(crate) country: String,
+    pub(crate) national_id: String,
     pub(crate) location_override_until: Option<OffsetDateTime>,
 }
 
@@ -69,12 +72,14 @@ impl From<UserRow> for AccountView {
             language: r.language,
             status: r.status,
             is_admin: r.is_admin,
+            country: r.country,
+            national_id: r.national_id,
         }
     }
 }
 
 const USER_ROW_COLUMNS: &str =
-    "id, user_code, email, first_name, last_name, password_hash, language, status, is_admin, country, location_override_until";
+    "id, user_code, email, first_name, last_name, password_hash, language, status, is_admin, country, national_id, location_override_until";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -475,4 +480,135 @@ pub async fn me(State(state): State<AppState>, jar: CookieJar) -> impl IntoRespo
             error(StatusCode::INTERNAL_SERVER_ERROR, "session_check_failed").into_response()
         }
     }
+}
+
+/// Resolves the caller's session, or the error response to return if
+/// there isn't one. Shared by every endpoint below that requires a live
+/// session but isn't `me` itself.
+async fn require_session(pool: &PgPool, jar: &CookieJar) -> Result<UserRow, axum::response::Response> {
+    match session_user(pool, jar).await {
+        Ok(Some(row)) => Ok(row),
+        Ok(None) => Err(error(StatusCode::UNAUTHORIZED, "not_authenticated").into_response()),
+        Err(err) => {
+            tracing::warn!(error=%err, "session lookup failed");
+            Err(error(StatusCode::INTERNAL_SERVER_ERROR, "session_check_failed").into_response())
+        }
+    }
+}
+
+/// Everything about a profile that's safe for the account holder to edit
+/// themselves. Email is deliberately excluded — it's the login identifier
+/// and changing it needs re-verification this endpoint doesn't do.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileUpdateRequest {
+    pub first_name: String,
+    pub last_name: String,
+    pub user_code: String,
+    pub country: String,
+    pub national_id: String,
+}
+
+pub async fn update_profile(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(req): Json<ProfileUpdateRequest>,
+) -> impl IntoResponse {
+    let pool = match require_pool(&state) {
+        Ok(pool) => pool,
+        Err(err) => return err.into_response(),
+    };
+    let current = match require_session(&pool, &jar).await {
+        Ok(row) => row,
+        Err(resp) => return resp,
+    };
+    let first_name = req.first_name.trim().to_string();
+    let last_name = req.last_name.trim().to_string();
+    let country = req.country.trim().to_string();
+    let national_id = req.national_id.trim().to_string();
+    let user_code = req.user_code.trim().to_uppercase();
+    if first_name.is_empty() || last_name.is_empty() || country.is_empty() || national_id.is_empty() {
+        return error(StatusCode::BAD_REQUEST, "invalid_input").into_response();
+    }
+    if !is_valid_user_code(&user_code) {
+        return error(StatusCode::BAD_REQUEST, "invalid_user_code").into_response();
+    }
+    let result = sqlx::query_as::<_, UserRow>(&format!(
+        "UPDATE web_users SET first_name = $1, last_name = $2, user_code = $3, country = $4, national_id = $5 \
+         WHERE id = $6 RETURNING {USER_ROW_COLUMNS}"
+    ))
+    .bind(&first_name)
+    .bind(&last_name)
+    .bind(&user_code)
+    .bind(&country)
+    .bind(&national_id)
+    .bind(&current.id)
+    .fetch_one(&pool)
+    .await;
+    match result {
+        Ok(row) => Json(AccountView::from(row)).into_response(),
+        Err(sqlx::Error::Database(db_err)) if db_err.constraint() == Some("web_users_user_code_key") => {
+            error(StatusCode::CONFLICT, "user_code_taken").into_response()
+        }
+        Err(err) => {
+            tracing::warn!(error=%err, "failed to update profile");
+            error(StatusCode::INTERNAL_SERVER_ERROR, "update_failed").into_response()
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PasswordChangeRequest {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+pub async fn change_password(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(req): Json<PasswordChangeRequest>,
+) -> impl IntoResponse {
+    let pool = match require_pool(&state) {
+        Ok(pool) => pool,
+        Err(err) => return err.into_response(),
+    };
+    let current = match require_session(&pool, &jar).await {
+        Ok(row) => row,
+        Err(resp) => return resp,
+    };
+    if !verify_password(&req.current_password, &current.password_hash) {
+        return error(StatusCode::UNAUTHORIZED, "invalid_credentials").into_response();
+    }
+    if req.new_password.len() < 8 {
+        return error(StatusCode::BAD_REQUEST, "invalid_input").into_response();
+    }
+    let Some(new_hash) = hash_password(&req.new_password) else {
+        return error(StatusCode::INTERNAL_SERVER_ERROR, "hash_failed").into_response();
+    };
+    if let Err(err) = sqlx::query("UPDATE web_users SET password_hash = $1 WHERE id = $2")
+        .bind(&new_hash)
+        .bind(&current.id)
+        .execute(&pool)
+        .await
+    {
+        tracing::warn!(error=%err, "failed to update password");
+        return error(StatusCode::INTERNAL_SERVER_ERROR, "update_failed").into_response();
+    }
+    // Changing the password invalidates every *other* session, so a stolen
+    // password can't keep riding an old cookie once the real owner acts —
+    // the session making this request stays alive, since it just proved
+    // the current password.
+    let Some(cookie) = jar.get(SESSION_COOKIE) else {
+        return StatusCode::NO_CONTENT.into_response();
+    };
+    if let Err(err) = sqlx::query("DELETE FROM web_sessions WHERE user_id = $1 AND token_hash != $2")
+        .bind(&current.id)
+        .bind(hash_token(cookie.value()))
+        .execute(&pool)
+        .await
+    {
+        tracing::warn!(error=%err, "failed to revoke other sessions after password change");
+    }
+    StatusCode::NO_CONTENT.into_response()
 }

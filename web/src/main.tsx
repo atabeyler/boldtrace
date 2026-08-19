@@ -9,7 +9,7 @@ function App(){
   if(account===undefined)return <div className="auth-boot"/>;
   if(account===null)return <AuthPage onAuthenticated={setAccount}/>;
 
-  const views:Record<string,React.ReactNode>={command:<CommandCenter/>,intelligence:<IntelligenceTerminal/>,engines:<EngineMatrix/>,performance:<PerformanceCenter/>,learning:<LearningCenter/>,scanner:<MarketScanner/>,alerts:<AlertsPage/>,history:<HistoryPage/>,health:<SystemHealth/>,settings:<SettingsPage account={account}/>,admin:<AdminPage/>};
+  const views:Record<string,React.ReactNode>={command:<CommandCenter/>,intelligence:<IntelligenceTerminal/>,engines:<EngineMatrix/>,performance:<PerformanceCenter/>,learning:<LearningCenter/>,scanner:<MarketScanner/>,alerts:<AlertsPage/>,history:<HistoryPage/>,health:<SystemHealth/>,settings:<SettingsPage account={account} onAccountChange={setAccount}/>,admin:<AdminPage/>};
   const signOut=()=>{api.logout().catch(()=>{}).finally(()=>setAccount(null))};
   return <AppShell active={page} onNavigate={setPage} onSignOut={signOut} isAdmin={account.isAdmin} accountLabel={account.firstName||account.userCode}>{views[page]??<CommandCenter/>}</AppShell>;
 }
