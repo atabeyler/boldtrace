@@ -198,11 +198,10 @@ async fn health(State(s): State<AppState>) -> Json<Vec<ServiceHealth>> {
     let (exchange_status, exchange_freshness_ms) = match s.live.as_ref() {
         Some(store) => {
             let reference = scan_symbols().and_then(|s| s.into_iter().next()).unwrap_or_else(|| "BTCUSDT".into());
-            match store.intelligence(&reference).await {
-                Ok(Some(live)) => {
-                    let age_ms = (now_millis() - live.timestamp).max(0) as u64;
+            match store.intelligence_age_ms(&reference).await {
+                Ok(Some(age_ms)) => {
                     let status = if age_ms < 60_000 { "healthy" } else { "degraded" };
-                    (status, Some(age_ms))
+                    (status, Some(age_ms as u64))
                 }
                 Ok(None) => ("offline", None),
                 Err(_) => ("degraded", None),
@@ -216,10 +215,6 @@ async fn health(State(s): State<AppState>) -> Json<Vec<ServiceHealth>> {
         ServiceHealth { name: "Postgres".into(), status: postgres_status.into(), freshness_ms: None, latency_ms: None },
         ServiceHealth { name: "Exchange Feed".into(), status: exchange_status.into(), freshness_ms: exchange_freshness_ms, latency_ms: None },
     ])
-}
-
-fn now_millis() -> i64 {
-    time::OffsetDateTime::now_utc().unix_timestamp() * 1000
 }
 
 async fn scanner(State(s): State<AppState>) -> Json<Vec<ScannerEntry>> {
