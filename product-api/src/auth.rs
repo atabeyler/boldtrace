@@ -97,7 +97,11 @@ fn is_valid_user_code(code: &str) -> bool {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginRequest {
-    pub email: String,
+    /// Either the account's email or its user code — the caller doesn't
+    /// specify which; the server tells them apart by whether it contains
+    /// an `@`, since email addresses always do and user codes (alphanumeric
+    /// only, see `is_valid_user_code`) never can.
+    pub identifier: String,
     pub password: String,
     pub remember_me: Option<bool>,
     /// Optional browser Geolocation API coordinates. Purely informational —
@@ -317,18 +321,21 @@ pub async fn login(
         Ok(pool) => pool,
         Err(err) => return err.into_response(),
     };
-    let email = req.email.trim().to_lowercase();
+    let raw_identifier = req.identifier.trim();
+    let is_email = raw_identifier.contains('@');
+    let identifier = if is_email { raw_identifier.to_lowercase() } else { raw_identifier.to_uppercase() };
     if !state
         .auth_rate_limiter
-        .check(&format!("login:{email}"), LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW)
+        .check(&format!("login:{identifier}"), LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW)
     {
         return error(StatusCode::TOO_MANY_REQUESTS, "rate_limited").into_response();
     }
     let remember_me = req.remember_me.unwrap_or(false);
+    let lookup_column = if is_email { "email" } else { "user_code" };
     let row = sqlx::query_as::<_, UserRow>(&format!(
-        "SELECT {USER_ROW_COLUMNS} FROM web_users WHERE email = $1"
+        "SELECT {USER_ROW_COLUMNS} FROM web_users WHERE {lookup_column} = $1"
     ))
-    .bind(&email)
+    .bind(&identifier)
     .fetch_optional(&pool)
     .await;
 

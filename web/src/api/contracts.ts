@@ -13,5 +13,5 @@ export interface Account{id:string;userCode:string;email:string;firstName:string
 export interface PendingUser{id:string;userCode:string;email:string;firstName:string;lastName:string;country:string;nationalId:string;createdAt:string}
 export interface LocationAlert{id:string;email:string;firstName:string;lastName:string;expectedCountry:string;detectedCountry:string;ip:string;createdAt:string}
 export interface RegisterInput{firstName:string;lastName:string;userCode:string;country:string;nationalId:string;email:string;password:string;language:string;termsAccepted:boolean}
-export interface LoginInput{email:string;password:string;rememberMe:boolean;browserLat?:number;browserLon?:number}
+export interface LoginInput{identifier:string;password:string;rememberMe:boolean;browserLat?:number;browserLon?:number}
 export interface ApiErrorBody{error:string}
