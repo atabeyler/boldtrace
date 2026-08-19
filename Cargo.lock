@@ -3128,6 +3128,7 @@ dependencies = [
  "argon2",
  "axum",
  "axum-extra",
+ "futures-util",
  "rand 0.8.7",
  "redis",
  "reqwest",

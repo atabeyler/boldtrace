@@ -36,11 +36,13 @@ with build type **Dockerfile**, build context `/`, Dockerfile path
   - `EMAIL_FROM` — the Resend-verified sender, e.g.
     `BOLDTRACE <noreply@yourdomain>`.
   - `SCAN_SYMBOLS` (optional, default `BTCUSDT`) — comma-separated symbols
-    the Market Scanner and System Health's exchange-feed check look at.
-    Only symbols the `exchange-client` service's own `EXCHANGE_SYMBOLS` is
-    actually ingesting will show live data here; anything else in the list
-    honestly reports `unavailable` rather than a fabricated row. Keep this
-    in sync with `exchange-client`'s `EXCHANGE_SYMBOLS`.
+    the Market Scanner and System Health's exchange-feed check look at, or
+    `ALL` to discover every symbol currently publishing live intelligence
+    directly from Redis (no list to keep in sync — whatever
+    `exchange-client` is actually tracking shows up automatically). With a
+    fixed list, only symbols `exchange-client`'s own `EXCHANGE_SYMBOLS` is
+    actually ingesting will show live data; anything else honestly reports
+    `unavailable` rather than a fabricated row.
 - Serves the web product's static build **and** the `/api/v1/*` HTTP API
   from the same origin, so no CORS configuration is needed. Only set
   `WEB_ORIGIN` if you deploy the web app as a separate Northflank service
@@ -58,15 +60,25 @@ with build type **Dockerfile**, build context `/`, Dockerfile path
 
 - Build target: `exchange-client`
 - Env vars: `REDIS_URL`, `EXCHANGE_SYMBOLS` (comma-separated, e.g.
-  `BTCUSDT,ETHUSDT,SOLUSDT`; default `BTCUSDT`; the older single-symbol
+  `BTCUSDT,ETHUSDT,SOLUSDT`; `ALL` to track every currently trading USDT
+  perpetual future; default `BTCUSDT`; the older single-symbol
   `EXCHANGE_SYMBOL` still works too), `RUST_LOG=info`
-- A single instance tracks every symbol in `EXCHANGE_SYMBOLS` over one
-  combined WebSocket connection per stream type (Binance's `/stream?streams=a/b/c`
-  form) — adding a symbol here does **not** require a second worker.
-  `SCAN_SYMBOLS` on `product-api` should match this list, or Market Scanner
-  will show `unavailable` for symbols exchange-client isn't ingesting.
-  Adding symbols does add real load (more WebSocket subscriptions, more
-  open-interest REST polls) so scale the service's resources with the list.
+- A single instance tracks every symbol in `EXCHANGE_SYMBOLS` — candles,
+  order book depth and funding rate are all sourced from the USDT-M futures
+  market (not spot), so every symbol has all four data types the scorer
+  needs. Streams are grouped across as many combined WebSocket connections
+  as needed to stay under Binance's 1024-streams-per-connection limit, so
+  adding a symbol (or using `ALL`, currently ~400 symbols) does **not**
+  require a second worker — it does add real load to the one worker (more
+  WebSocket subscriptions, more open-interest REST polls, more decisions
+  persisted to Postgres per minute), so size the service's CPU/RAM for the
+  list you configure, especially `ALL`.
+- `ALL` re-resolves the live symbol list from Binance once at startup, not
+  continuously — a newly listed perpetual is picked up on the next
+  restart/redeploy, not immediately.
+- `product-api`'s `SCAN_SYMBOLS=ALL` discovers the live set from Redis
+  directly, so it doesn't need to be kept in sync with a fixed
+  `EXCHANGE_SYMBOLS` list.
 
 ### `bot` (background worker, no public port — Telegram bot)
 

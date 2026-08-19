@@ -7,7 +7,14 @@ async fn main() {
     tracing_subscriber_init();
 
     let config = ExchangeClientConfig::from_env();
-    tracing::info!(symbols = %config.symbols.join(","), "starting exchange-client");
+    let config = match config.resolve_symbols().await {
+        Ok(config) => config,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to discover symbol universe");
+            std::process::exit(1);
+        }
+    };
+    tracing::info!(count = config.symbols.len(), symbols = %config.symbols.join(","), "starting exchange-client");
 
     if let Err(err) = exchange_client::run(config).await {
         tracing::error!(error = %err, "exchange-client exited with an error");

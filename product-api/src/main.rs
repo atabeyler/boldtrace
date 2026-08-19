@@ -70,17 +70,22 @@ struct ScannerEntry {
     market: Option<MarketDecision>,
 }
 
-/// Symbols the Market Scanner surfaces. Configurable because only symbols
-/// an exchange-client instance is actually ingesting will ever have live
-/// data; anything else honestly reports `unavailable` rather than a
-/// fabricated row.
-fn scan_symbols() -> Vec<String> {
-    env::var("SCAN_SYMBOLS")
-        .unwrap_or_else(|_| "BTCUSDT".into())
-        .split(',')
-        .map(|s| s.trim().to_uppercase())
-        .filter(|s| !s.is_empty())
-        .collect()
+/// Fixed symbols the Market Scanner surfaces, or `None` when `SCAN_SYMBOLS`
+/// is `ALL` and the live set should instead be discovered from Redis (see
+/// `scanner`). Only symbols an exchange-client instance is actually
+/// ingesting will ever have live data; anything else honestly reports
+/// `unavailable` rather than a fabricated row.
+fn scan_symbols() -> Option<Vec<String>> {
+    let raw = env::var("SCAN_SYMBOLS").unwrap_or_else(|_| "BTCUSDT".into());
+    if raw.trim().eq_ignore_ascii_case("ALL") {
+        return None;
+    }
+    Some(
+        raw.split(',')
+            .map(|s| s.trim().to_uppercase())
+            .filter(|s| !s.is_empty())
+            .collect(),
+    )
 }
 
 #[tokio::main]
@@ -192,7 +197,7 @@ async fn health(State(s): State<AppState>) -> Json<Vec<ServiceHealth>> {
     };
     let (exchange_status, exchange_freshness_ms) = match s.live.as_ref() {
         Some(store) => {
-            let reference = scan_symbols().into_iter().next().unwrap_or_else(|| "BTCUSDT".into());
+            let reference = scan_symbols().and_then(|s| s.into_iter().next()).unwrap_or_else(|| "BTCUSDT".into());
             match store.intelligence(&reference).await {
                 Ok(Some(live)) => {
                     let age_ms = (now_millis() - live.timestamp).max(0) as u64;
@@ -218,11 +223,22 @@ fn now_millis() -> i64 {
 }
 
 async fn scanner(State(s): State<AppState>) -> Json<Vec<ScannerEntry>> {
+    let fixed = scan_symbols();
     let Some(store) = s.live.as_ref() else {
-        return Json(scan_symbols().into_iter().map(|symbol| ScannerEntry { symbol, status: "unavailable".into(), market: None }).collect());
+        return Json(fixed.unwrap_or_default().into_iter().map(|symbol| ScannerEntry { symbol, status: "unavailable".into(), market: None }).collect());
+    };
+    let symbols = match fixed {
+        Some(symbols) => symbols,
+        None => match store.live_symbols().await {
+            Ok(symbols) => symbols,
+            Err(err) => {
+                tracing::warn!(error=%err, "scanner symbol discovery failed");
+                Vec::new()
+            }
+        },
     };
     let mut out = Vec::new();
-    for symbol in scan_symbols() {
+    for symbol in symbols {
         let entry = match store.intelligence(&symbol).await {
             Ok(Some(live)) => ScannerEntry { symbol: symbol.clone(), status: "live".into(), market: Some(to_market(live)) },
             Ok(None) => ScannerEntry { symbol, status: "unavailable".into(), market: None },
