@@ -157,7 +157,6 @@ async fn main() {
         .route("/api/v1/auth/me", get(auth::me))
         .route("/api/v1/auth/profile", axum::routing::patch(auth::update_profile))
         .route("/api/v1/auth/password", post(auth::change_password))
-        .route("/api/v1/auth/bootstrap-reset", post(auth::bootstrap_reset))
         .route("/api/v1/admin/pending-users", get(admin::list_pending))
         .route("/api/v1/admin/users", get(admin::list_all_users))
         .route("/api/v1/admin/users/:id/approve", post(admin::approve))
