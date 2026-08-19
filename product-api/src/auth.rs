@@ -598,17 +598,23 @@ pub async fn change_password(
     // Changing the password invalidates every *other* session, so a stolen
     // password can't keep riding an old cookie once the real owner acts —
     // the session making this request stays alive, since it just proved
-    // the current password.
-    let Some(cookie) = jar.get(SESSION_COOKIE) else {
-        return StatusCode::NO_CONTENT.into_response();
-    };
-    if let Err(err) = sqlx::query("DELETE FROM web_sessions WHERE user_id = $1 AND token_hash != $2")
-        .bind(&current.id)
-        .bind(hash_token(cookie.value()))
-        .execute(&pool)
-        .await
-    {
-        tracing::warn!(error=%err, "failed to revoke other sessions after password change");
+    // the current password. The password itself is already safely
+    // persisted at this point, so the revoke runs in the background
+    // instead of holding the response open on a second query.
+    if let Some(cookie) = jar.get(SESSION_COOKIE) {
+        let pool = pool.clone();
+        let user_id = current.id.clone();
+        let token_hash = hash_token(cookie.value());
+        tokio::spawn(async move {
+            if let Err(err) = sqlx::query("DELETE FROM web_sessions WHERE user_id = $1 AND token_hash != $2")
+                .bind(&user_id)
+                .bind(&token_hash)
+                .execute(&pool)
+                .await
+            {
+                tracing::warn!(error=%err, "failed to revoke other sessions after password change");
+            }
+        });
     }
     StatusCode::NO_CONTENT.into_response()
 }
