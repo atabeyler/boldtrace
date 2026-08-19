@@ -9,7 +9,7 @@ export function MarketScanner(){
 export function AlertsPage(){
   const{t}=useI18n();
   const{data,loading,error}=useApi(()=>api.alerts(20),[],20000);
-  return <Page t={t} title={t.alertsTitle} sub={t.alertsSub}><section className="panel alert-list">{loading&&!data&&<p>{t.alertsLoading}</p>}{!loading&&(!data||data.length===0)&&<p>{error||t.alertsEmpty}</p>}{data?.map(a=><article key={a.id}><b>{a.severity}</b><strong>{a.symbol}</strong><span>{a.decision} · {a.confidence.toFixed(0)}%</span><small>{new Date(a.createdAt).toLocaleString()}</small></article>)}</section></Page>
+  return <Page t={t} title={t.alertsTitle} sub={t.alertsSub}><section className="panel alert-list">{loading&&!data&&<p>{t.alertsLoading}</p>}{!loading&&(!data||data.length===0)&&<p>{error||t.alertsEmpty}</p>}{data?.map((a,i)=><article key={a.id+'-'+i}><b>{a.severity}</b><strong>{a.symbol}</strong><span>{a.decision} · {a.confidence.toFixed(0)}%</span><small>{new Date(a.createdAt).toLocaleString()}</small></article>)}</section></Page>
 }
 
 export function HistoryPage(){
