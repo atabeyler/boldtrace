@@ -7,7 +7,7 @@ async fn main() {
     tracing_subscriber_init();
 
     let config = ExchangeClientConfig::from_env();
-    tracing::info!(symbol = %config.symbol, "starting exchange-client");
+    tracing::info!(symbols = %config.symbols.join(","), "starting exchange-client");
 
     if let Err(err) = exchange_client::run(config).await {
         tracing::error!(error = %err, "exchange-client exited with an error");

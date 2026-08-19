@@ -20,11 +20,16 @@ fn current_millis() -> i64 {
 }
 
 fn spot_stream_url(config: &ExchangeClientConfig) -> String {
-    let symbol = config.symbol_lower();
-    format!(
-        "{}?streams={symbol}@kline_1m/{symbol}@kline_5m/{symbol}@depth20@1000ms",
-        config.spot_ws_base
-    )
+    let streams = config
+        .symbols
+        .iter()
+        .map(|s| {
+            let symbol = s.to_lowercase();
+            format!("{symbol}@kline_1m/{symbol}@kline_5m/{symbol}@depth20@1000ms")
+        })
+        .collect::<Vec<_>>()
+        .join("/");
+    format!("{}?streams={streams}", config.spot_ws_base)
 }
 
 /// Runs the spot stream connection forever, reconnecting with exponential
@@ -121,11 +126,24 @@ mod tests {
 
     #[test]
     fn builds_expected_stream_url() {
-        let config = ExchangeClientConfig::new("BTCUSDT", "redis://127.0.0.1:6379");
+        let config = ExchangeClientConfig::new(vec!["BTCUSDT".into()], "redis://127.0.0.1:6379");
         let url = spot_stream_url(&config);
         assert_eq!(
             url,
             "wss://stream.binance.com:9443/stream?streams=btcusdt@kline_1m/btcusdt@kline_5m/btcusdt@depth20@1000ms"
+        );
+    }
+
+    #[test]
+    fn builds_combined_stream_url_for_multiple_symbols() {
+        let config = ExchangeClientConfig::new(
+            vec!["BTCUSDT".into(), "ETHUSDT".into()],
+            "redis://127.0.0.1:6379",
+        );
+        let url = spot_stream_url(&config);
+        assert_eq!(
+            url,
+            "wss://stream.binance.com:9443/stream?streams=btcusdt@kline_1m/btcusdt@kline_5m/btcusdt@depth20@1000ms/ethusdt@kline_1m/ethusdt@kline_5m/ethusdt@depth20@1000ms"
         );
     }
 }

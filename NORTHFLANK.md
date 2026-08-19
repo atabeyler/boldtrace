@@ -37,12 +37,10 @@ with build type **Dockerfile**, build context `/`, Dockerfile path
     `BOLDTRACE <noreply@yourdomain>`.
   - `SCAN_SYMBOLS` (optional, default `BTCUSDT`) — comma-separated symbols
     the Market Scanner and System Health's exchange-feed check look at.
-    Only symbols an `exchange-client` instance is actually ingesting will
-    show live data here; anything else in the list honestly reports
-    `unavailable` rather than a fabricated row. Scanning more symbols means
-    running more `exchange-client` workers, which is a real infrastructure
-    cost — don't add symbols to this list without also deploying the
-    ingestion for them.
+    Only symbols the `exchange-client` service's own `EXCHANGE_SYMBOLS` is
+    actually ingesting will show live data here; anything else in the list
+    honestly reports `unavailable` rather than a fabricated row. Keep this
+    in sync with `exchange-client`'s `EXCHANGE_SYMBOLS`.
 - Serves the web product's static build **and** the `/api/v1/*` HTTP API
   from the same origin, so no CORS configuration is needed. Only set
   `WEB_ORIGIN` if you deploy the web app as a separate Northflank service
@@ -59,7 +57,16 @@ with build type **Dockerfile**, build context `/`, Dockerfile path
 ### `exchange-client` (background worker, no public port)
 
 - Build target: `exchange-client`
-- Env vars: `REDIS_URL`, `EXCHANGE_SYMBOL` (default `BTCUSDT`), `RUST_LOG=info`
+- Env vars: `REDIS_URL`, `EXCHANGE_SYMBOLS` (comma-separated, e.g.
+  `BTCUSDT,ETHUSDT,SOLUSDT`; default `BTCUSDT`; the older single-symbol
+  `EXCHANGE_SYMBOL` still works too), `RUST_LOG=info`
+- A single instance tracks every symbol in `EXCHANGE_SYMBOLS` over one
+  combined WebSocket connection per stream type (Binance's `/stream?streams=a/b/c`
+  form) — adding a symbol here does **not** require a second worker.
+  `SCAN_SYMBOLS` on `product-api` should match this list, or Market Scanner
+  will show `unavailable` for symbols exchange-client isn't ingesting.
+  Adding symbols does add real load (more WebSocket subscriptions, more
+  open-interest REST polls) so scale the service's resources with the list.
 
 ### `bot` (background worker, no public port — Telegram bot)
 

@@ -13,11 +13,13 @@ use crate::error::Result;
 use crate::redis_publisher::RedisPublisher;
 
 fn funding_stream_url(config: &ExchangeClientConfig) -> String {
-    format!(
-        "{}?streams={}@markPrice@1s",
-        config.futures_ws_base,
-        config.symbol_lower()
-    )
+    let streams = config
+        .symbols
+        .iter()
+        .map(|s| format!("{}@markPrice@1s", s.to_lowercase()))
+        .collect::<Vec<_>>()
+        .join("/");
+    format!("{}?streams={streams}", config.futures_ws_base)
 }
 
 /// Runs the futures mark price stream forever, reconnecting with
@@ -88,15 +90,17 @@ async fn handle_funding_message(text: &str, publisher: &mut RedisPublisher) {
     }
 }
 
-/// Fetches recent funding rate history over REST, used as a fallback when
-/// the WebSocket stream is unavailable or to backfill history on startup.
+/// Fetches recent funding rate history over REST for one `symbol`, used as
+/// a fallback when the WebSocket stream is unavailable or to backfill
+/// history on startup.
 pub async fn fetch_funding_rate_history(
     config: &ExchangeClientConfig,
+    symbol: &str,
     limit: u32,
 ) -> Result<Vec<shared::FundingRate>> {
     let url = format!(
         "{}/fapi/v1/fundingRate?symbol={}&limit={}",
-        config.futures_rest_base, config.symbol, limit
+        config.futures_rest_base, symbol, limit
     );
     let entries: Vec<FundingRateHistoryEntry> = reqwest::get(url).await?.json().await?;
     Ok(entries
@@ -111,11 +115,24 @@ mod tests {
 
     #[test]
     fn builds_expected_stream_url() {
-        let config = ExchangeClientConfig::new("BTCUSDT", "redis://127.0.0.1:6379");
+        let config = ExchangeClientConfig::new(vec!["BTCUSDT".into()], "redis://127.0.0.1:6379");
         let url = funding_stream_url(&config);
         assert_eq!(
             url,
             "wss://fstream.binance.com/stream?streams=btcusdt@markPrice@1s"
+        );
+    }
+
+    #[test]
+    fn builds_combined_stream_url_for_multiple_symbols() {
+        let config = ExchangeClientConfig::new(
+            vec!["BTCUSDT".into(), "ETHUSDT".into()],
+            "redis://127.0.0.1:6379",
+        );
+        let url = funding_stream_url(&config);
+        assert_eq!(
+            url,
+            "wss://fstream.binance.com/stream?streams=btcusdt@markPrice@1s/ethusdt@markPrice@1s"
         );
     }
 }
