@@ -43,14 +43,15 @@ function ProfileSection({account,onAccountChange,t,lang}:{account:Account;onAcco
     e.preventDefault();
     setPwMessage(null);
     setPwBusy(true);
-    const form=new FormData(e.currentTarget);
+    const formEl=e.currentTarget;
+    const form=new FormData(formEl);
     try{
       await api.changePassword({
         currentPassword:String(form.get('currentPassword')||''),
         newPassword:String(form.get('newPassword')||''),
       });
       setPwMessage({kind:'ok',text:t.settingsPasswordChanged});
-      e.currentTarget.reset();
+      formEl.reset();
     }catch(err){
       const code=err instanceof ApiError?err.code:'';
       setPwMessage({kind:'err',text:code==='invalid_credentials'?t.settingsCurrentPasswordWrong:t.errorGeneric});
