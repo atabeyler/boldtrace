@@ -612,3 +612,68 @@ pub async fn change_password(
     }
     StatusCode::NO_CONTENT.into_response()
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapResetRequest {
+    pub user_code: String,
+    pub new_password: String,
+}
+
+/// Break-glass credential reset for the bootstrap admin account only,
+/// disabled unless `BOOTSTRAP_RESET_SECRET` is set in the environment and
+/// the caller supplies it via `X-Bootstrap-Secret`. Scoped to
+/// `ADMIN_BOOTSTRAP_EMAIL` deliberately — this is account recovery for the
+/// one operator-controlled account, not a general password-reset feature.
+pub async fn bootstrap_reset(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<BootstrapResetRequest>,
+) -> impl IntoResponse {
+    let Ok(secret) = std::env::var("BOOTSTRAP_RESET_SECRET") else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let Some(email) = std::env::var("ADMIN_BOOTSTRAP_EMAIL").ok().map(|e| e.to_lowercase()) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let supplied = headers
+        .get("x-bootstrap-secret")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    if supplied != secret {
+        return error(StatusCode::UNAUTHORIZED, "invalid_credentials").into_response();
+    }
+    let pool = match require_pool(&state) {
+        Ok(pool) => pool,
+        Err(err) => return err.into_response(),
+    };
+    let user_code = req.user_code.trim().to_uppercase();
+    if !is_valid_user_code(&user_code) {
+        return error(StatusCode::BAD_REQUEST, "invalid_user_code").into_response();
+    }
+    if req.new_password.len() < 8 {
+        return error(StatusCode::BAD_REQUEST, "invalid_input").into_response();
+    }
+    let Some(new_hash) = hash_password(&req.new_password) else {
+        return error(StatusCode::INTERNAL_SERVER_ERROR, "hash_failed").into_response();
+    };
+    let result = sqlx::query_as::<_, UserRow>(&format!(
+        "UPDATE web_users SET user_code = $1, password_hash = $2 WHERE email = $3 RETURNING {USER_ROW_COLUMNS}"
+    ))
+    .bind(&user_code)
+    .bind(&new_hash)
+    .bind(&email)
+    .fetch_optional(&pool)
+    .await;
+    match result {
+        Ok(Some(row)) => Json(AccountView::from(row)).into_response(),
+        Ok(None) => error(StatusCode::NOT_FOUND, "not_found").into_response(),
+        Err(sqlx::Error::Database(db_err)) if db_err.constraint() == Some("web_users_user_code_key") => {
+            error(StatusCode::CONFLICT, "user_code_taken").into_response()
+        }
+        Err(err) => {
+            tracing::warn!(error=%err, "bootstrap reset failed");
+            error(StatusCode::INTERNAL_SERVER_ERROR, "update_failed").into_response()
+        }
+    }
+}
