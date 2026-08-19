@@ -1,10 +1,13 @@
 mod adapter;
 mod admin;
+mod alerts;
 mod auth;
 mod email;
 mod geoip;
 mod history;
+mod learning;
 mod live_store;
+mod performance;
 mod rate_limit;
 mod state;
 
@@ -57,6 +60,27 @@ struct ServiceHealth {
     status: String,
     freshness_ms: Option<u64>,
     latency_ms: Option<u64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ScannerEntry {
+    symbol: String,
+    status: String,
+    market: Option<MarketDecision>,
+}
+
+/// Symbols the Market Scanner surfaces. Configurable because only symbols
+/// an exchange-client instance is actually ingesting will ever have live
+/// data; anything else honestly reports `unavailable` rather than a
+/// fabricated row.
+fn scan_symbols() -> Vec<String> {
+    env::var("SCAN_SYMBOLS")
+        .unwrap_or_else(|_| "BTCUSDT".into())
+        .split(',')
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 #[tokio::main]
@@ -117,6 +141,10 @@ async fn main() {
     let mut app = Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/intelligence/:symbol", get(intelligence))
+        .route("/api/v1/scanner", get(scanner))
+        .route("/api/v1/performance/:symbol", get(performance::performance))
+        .route("/api/v1/learning/:symbol", get(learning::learning))
+        .route("/api/v1/alerts", get(alerts::alerts))
         .route("/api/v1/history", get(history::history))
         .route("/api/v1/auth/register", post(auth::register))
         .route("/api/v1/auth/login", post(auth::login))
@@ -162,11 +190,50 @@ async fn health(State(s): State<AppState>) -> Json<Vec<ServiceHealth>> {
         },
         None => "offline",
     };
+    let (exchange_status, exchange_freshness_ms) = match s.live.as_ref() {
+        Some(store) => {
+            let reference = scan_symbols().into_iter().next().unwrap_or_else(|| "BTCUSDT".into());
+            match store.intelligence(&reference).await {
+                Ok(Some(live)) => {
+                    let age_ms = (now_millis() - live.timestamp).max(0) as u64;
+                    let status = if age_ms < 60_000 { "healthy" } else { "degraded" };
+                    (status, Some(age_ms))
+                }
+                Ok(None) => ("offline", None),
+                Err(_) => ("degraded", None),
+            }
+        }
+        None => ("offline", None),
+    };
     Json(vec![
         ServiceHealth { name: "Product API".into(), status: "healthy".into(), freshness_ms: Some(0), latency_ms: Some(0) },
         ServiceHealth { name: "Redis".into(), status: if redis_ok { "healthy" } else { "degraded" }.into(), freshness_ms: None, latency_ms: None },
         ServiceHealth { name: "Postgres".into(), status: postgres_status.into(), freshness_ms: None, latency_ms: None },
+        ServiceHealth { name: "Exchange Feed".into(), status: exchange_status.into(), freshness_ms: exchange_freshness_ms, latency_ms: None },
     ])
+}
+
+fn now_millis() -> i64 {
+    time::OffsetDateTime::now_utc().unix_timestamp() * 1000
+}
+
+async fn scanner(State(s): State<AppState>) -> Json<Vec<ScannerEntry>> {
+    let Some(store) = s.live.as_ref() else {
+        return Json(scan_symbols().into_iter().map(|symbol| ScannerEntry { symbol, status: "unavailable".into(), market: None }).collect());
+    };
+    let mut out = Vec::new();
+    for symbol in scan_symbols() {
+        let entry = match store.intelligence(&symbol).await {
+            Ok(Some(live)) => ScannerEntry { symbol: symbol.clone(), status: "live".into(), market: Some(to_market(live)) },
+            Ok(None) => ScannerEntry { symbol, status: "unavailable".into(), market: None },
+            Err(err) => {
+                tracing::warn!(error=%err, %symbol, "scanner read failed");
+                ScannerEntry { symbol, status: "unavailable".into(), market: None }
+            }
+        };
+        out.push(entry);
+    }
+    Json(out)
 }
 
 async fn intelligence(State(s): State<AppState>, Path(symbol): Path<String>) -> impl IntoResponse {

@@ -35,6 +35,14 @@ with build type **Dockerfile**, build context `/`, Dockerfile path
     you register with first.
   - `EMAIL_FROM` — the Resend-verified sender, e.g.
     `BOLDTRACE <noreply@yourdomain>`.
+  - `SCAN_SYMBOLS` (optional, default `BTCUSDT`) — comma-separated symbols
+    the Market Scanner and System Health's exchange-feed check look at.
+    Only symbols an `exchange-client` instance is actually ingesting will
+    show live data here; anything else in the list honestly reports
+    `unavailable` rather than a fabricated row. Scanning more symbols means
+    running more `exchange-client` workers, which is a real infrastructure
+    cost — don't add symbols to this list without also deploying the
+    ingestion for them.
 - Serves the web product's static build **and** the `/api/v1/*` HTTP API
   from the same origin, so no CORS configuration is needed. Only set
   `WEB_ORIGIN` if you deploy the web app as a separate Northflank service
