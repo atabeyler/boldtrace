@@ -1,8 +1,7 @@
-//! Connects to Binance's USDT-margined futures combined WebSocket stream
-//! for kline and order book depth updates, and republishes them to Redis.
-//! Sourced from futures rather than spot so every tracked symbol's candles
-//! and order book come from the same market as its funding rate and open
-//! interest (see `ExchangeClientConfig::futures_ws_base`).
+//! Connects to Binance's spot combined WebSocket stream for kline and
+//! order book depth updates, and republishes them to Redis. Deliberately
+//! spot rather than futures — see `ExchangeClientConfig::spot_ws_base` for
+//! why.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -28,11 +27,11 @@ fn candle_stream_url(config: &ExchangeClientConfig) -> String {
         .iter()
         .map(|s| {
             let symbol = s.to_lowercase();
-            format!("{symbol}@kline_1m/{symbol}@kline_5m/{symbol}@depth20")
+            format!("{symbol}@kline_1m/{symbol}@kline_5m/{symbol}@depth20@1000ms")
         })
         .collect::<Vec<_>>()
         .join("/");
-    format!("{}?streams={streams}", config.futures_ws_base)
+    format!("{}?streams={streams}", config.spot_ws_base)
 }
 
 /// Runs the candle/depth stream connection forever, reconnecting with
@@ -58,7 +57,7 @@ async fn run_candle_stream_once(
     publisher: &mut RedisPublisher,
 ) -> Result<()> {
     let url = candle_stream_url(config);
-    tracing::info!(%url, "connecting to Binance futures candle/depth stream");
+    tracing::info!(%url, "connecting to Binance spot candle/depth stream");
     let (ws_stream, _) = tokio_tungstenite::connect_async(url).await?;
     let (mut write, mut read) = ws_stream.split();
 
@@ -133,7 +132,7 @@ mod tests {
         let url = candle_stream_url(&config);
         assert_eq!(
             url,
-            "wss://fstream.binance.com/stream?streams=btcusdt@kline_1m/btcusdt@kline_5m/btcusdt@depth20"
+            "wss://stream.binance.com:9443/stream?streams=btcusdt@kline_1m/btcusdt@kline_5m/btcusdt@depth20@1000ms"
         );
     }
 
@@ -146,7 +145,7 @@ mod tests {
         let url = candle_stream_url(&config);
         assert_eq!(
             url,
-            "wss://fstream.binance.com/stream?streams=btcusdt@kline_1m/btcusdt@kline_5m/btcusdt@depth20/ethusdt@kline_1m/ethusdt@kline_5m/ethusdt@depth20"
+            "wss://stream.binance.com:9443/stream?streams=btcusdt@kline_1m/btcusdt@kline_5m/btcusdt@depth20@1000ms/ethusdt@kline_1m/ethusdt@kline_5m/ethusdt@depth20@1000ms"
         );
     }
 }

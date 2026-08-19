@@ -56,16 +56,12 @@ impl KlineEvent {
     }
 }
 
-/// USDⓈ-M futures partial book depth payload (`<symbol>@depth20`). Unlike
-/// the spot market's equivalent stream (`{"lastUpdateId":..,"bids":..,"asks":..}`),
-/// futures uses the short field names below. The symbol isn't repeated
-/// here either, so both symbol and timestamp are supplied by the caller
-/// from the stream name and the local clock.
+/// Spot partial book depth payload (`<symbol>@depth20`). Binance does not
+/// embed the symbol or a timestamp in this payload, so both are supplied
+/// by the caller from the stream name and the local clock.
 #[derive(Debug, Deserialize)]
 pub struct DepthPayload {
-    #[serde(rename = "b")]
     pub bids: Vec<[String; 2]>,
-    #[serde(rename = "a")]
     pub asks: Vec<[String; 2]>,
 }
 
@@ -164,10 +160,9 @@ mod tests {
     #[test]
     fn parses_depth_payload() {
         let raw = r#"{
-            "e": "depthUpdate", "E": 1571889248277, "T": 1571889248276,
-            "s": "BTCUSDT", "U": 1, "u": 2, "pu": 0,
-            "b": [["0.0024", "10"]],
-            "a": [["0.0026", "100"]]
+            "lastUpdateId": 160,
+            "bids": [["0.0024", "10"]],
+            "asks": [["0.0026", "100"]]
         }"#;
         let payload: DepthPayload = serde_json::from_str(raw).unwrap();
         let snapshot = payload.into_snapshot("BTCUSDT".to_string(), 42).unwrap();
@@ -192,7 +187,7 @@ mod tests {
 
     #[test]
     fn parses_combined_stream_envelope() {
-        let raw = r#"{"stream":"btcusdt@depth20","data":{"e":"depthUpdate","E":1,"T":1,"s":"BTCUSDT","U":1,"u":1,"pu":0,"b":[],"a":[]}}"#;
+        let raw = r#"{"stream":"btcusdt@depth20","data":{"lastUpdateId":1,"bids":[],"asks":[]}}"#;
         let envelope: CombinedStreamEnvelope<DepthPayload> = serde_json::from_str(raw).unwrap();
         assert_eq!(envelope.stream, "btcusdt@depth20");
     }

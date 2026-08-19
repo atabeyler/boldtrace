@@ -21,13 +21,18 @@ pub struct ExchangeClientConfig {
     pub symbols: Vec<String>,
     /// Redis connection URL, e.g. `redis://127.0.0.1:6379`.
     pub redis_url: String,
-    /// Base URL for the Binance USDT-margined futures WebSocket stream.
-    /// Candles, order book depth and funding rate are all sourced from the
-    /// futures market rather than spot: funding rate and open interest only
-    /// exist there, and this product's signals are defined against
-    /// perpetual futures, so keeping every data source on the same market
-    /// avoids subtle spot/futures divergence and guarantees every
-    /// discovered symbol actually has all four data types.
+    /// Base URL for the Binance spot combined WebSocket stream. Candles and
+    /// order book depth come from spot, not futures: live verification
+    /// showed Binance's USDⓈ-M futures WS silently drops kline/markPrice/
+    /// aggTrade/ticker frames (confirmed with a raw client bypassing this
+    /// codebase entirely, from two independent networks — only depth and
+    /// bookTicker came through), while spot has run these exact streams
+    /// reliably in this product for weeks. Funding rate and open interest
+    /// still come from futures below since spot has neither.
+    pub spot_ws_base: String,
+    /// Base URL for the Binance USDT-margined futures WebSocket stream
+    /// (funding rate only — see `spot_ws_base` for why candles/depth moved
+    /// off futures).
     pub futures_ws_base: String,
     /// Base URL for the Binance USDT-margined futures REST API (used to
     /// discover the tradable symbol universe, fetch funding rate history,
@@ -42,6 +47,7 @@ impl ExchangeClientConfig {
         Self {
             symbols,
             redis_url: redis_url.into(),
+            spot_ws_base: "wss://stream.binance.com:9443/stream".to_string(),
             futures_ws_base: "wss://fstream.binance.com/stream".to_string(),
             futures_rest_base: "https://fapi.binance.com".to_string(),
         }
