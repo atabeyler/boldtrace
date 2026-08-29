@@ -506,16 +506,14 @@ pub async fn me(State(state): State<AppState>, jar: CookieJar) -> impl IntoRespo
 async fn require_session(
     pool: &PgPool,
     jar: &CookieJar,
-) -> Result<UserRow, axum::response::Response> {
+) -> Result<UserRow, (StatusCode, Json<ErrorBody>)> {
     match session_user(pool, jar).await {
         Ok(Some(row)) if row.status == "approved" => Ok(row),
-        Ok(Some(_)) => {
-            Err(error(StatusCode::FORBIDDEN, "account_not_approved").into_response())
-        }
-        Ok(None) => Err(error(StatusCode::UNAUTHORIZED, "not_authenticated").into_response()),
+        Ok(Some(_)) => Err(error(StatusCode::FORBIDDEN, "account_not_approved")),
+        Ok(None) => Err(error(StatusCode::UNAUTHORIZED, "not_authenticated")),
         Err(err) => {
             tracing::warn!(error=%err, "session lookup failed");
-            Err(error(StatusCode::INTERNAL_SERVER_ERROR, "session_check_failed").into_response())
+            Err(error(StatusCode::INTERNAL_SERVER_ERROR, "session_check_failed"))
         }
     }
 }
@@ -541,7 +539,7 @@ pub async fn update_profile(
     };
     let current = match require_session(&pool, &jar).await {
         Ok(row) => row,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let first_name = req.first_name.trim().to_string();
     let last_name = req.last_name.trim().to_string();
@@ -598,7 +596,7 @@ pub async fn change_password(
     };
     let current = match require_session(&pool, &jar).await {
         Ok(row) => row,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !verify_password(&req.current_password, &current.password_hash) {
         return error(StatusCode::UNAUTHORIZED, "invalid_credentials").into_response();

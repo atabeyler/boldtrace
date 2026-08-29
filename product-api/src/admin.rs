@@ -56,19 +56,19 @@ impl From<PendingRow> for PendingUser {
 }
 
 /// Confirms the caller has a live session and `is_admin = true`; returns
-/// the pool for the caller to keep using, or the error response to return.
+/// the pool for the caller to keep using, or a compact typed error.
 async fn require_admin(
     state: &AppState,
     jar: &CookieJar,
-) -> Result<PgPool, axum::response::Response> {
-    let pool = auth::require_pool(state).map_err(IntoResponse::into_response)?;
+) -> Result<PgPool, (StatusCode, Json<auth::ErrorBody>)> {
+    let pool = auth::require_pool(state)?;
     match auth::session_user(&pool, jar).await {
         Ok(Some(user)) if user.is_admin => Ok(pool),
-        Ok(Some(_)) => Err(error(StatusCode::FORBIDDEN, "admin_required").into_response()),
-        Ok(None) => Err(error(StatusCode::UNAUTHORIZED, "not_authenticated").into_response()),
+        Ok(Some(_)) => Err(error(StatusCode::FORBIDDEN, "admin_required")),
+        Ok(None) => Err(error(StatusCode::UNAUTHORIZED, "not_authenticated")),
         Err(err) => {
             tracing::warn!(error=%err, "admin session lookup failed");
-            Err(error(StatusCode::INTERNAL_SERVER_ERROR, "session_check_failed").into_response())
+            Err(error(StatusCode::INTERNAL_SERVER_ERROR, "session_check_failed"))
         }
     }
 }
@@ -76,7 +76,7 @@ async fn require_admin(
 pub async fn list_pending(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
     let pool = match require_admin(&state, &jar).await {
         Ok(pool) => pool,
-        Err(resp) => return resp,
+        Err(resp) => return resp.into_response(),
     };
     let rows = sqlx::query_as::<_, PendingRow>(
         "SELECT id, user_code, email, first_name, last_name, country, national_id, created_at \
@@ -101,7 +101,7 @@ async fn set_status(
 ) -> impl IntoResponse {
     let pool = match require_admin(&state, &jar).await {
         Ok(pool) => pool,
-        Err(resp) => return resp,
+        Err(resp) => return resp.into_response(),
     };
     let result = sqlx::query_as::<_, (String, String)>(
         "UPDATE web_users SET status = $1 WHERE id = $2 AND status = 'pending' RETURNING email, first_name",
@@ -193,7 +193,7 @@ const LOCATION_OVERRIDE_HOURS: i64 = 24;
 pub async fn list_location_alerts(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
     let pool = match require_admin(&state, &jar).await {
         Ok(pool) => pool,
-        Err(resp) => return resp,
+        Err(resp) => return resp.into_response(),
     };
     let rows = sqlx::query_as::<_, LocationAlertRow>(
         "SELECT a.id, a.email, u.first_name, u.last_name, a.expected_country, a.detected_country, a.ip, a.created_at \
@@ -220,7 +220,7 @@ pub async fn allow_location(
 ) -> impl IntoResponse {
     let pool = match require_admin(&state, &jar).await {
         Ok(pool) => pool,
-        Err(resp) => return resp,
+        Err(resp) => return resp.into_response(),
     };
     let resolved = sqlx::query_as::<_, (String,)>(
         "UPDATE login_location_alerts SET resolved = true WHERE id = $1 AND resolved = false RETURNING user_id",
@@ -305,7 +305,7 @@ impl From<AdminUserRow> for AdminUserView {
 pub async fn list_all_users(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
     let pool = match require_admin(&state, &jar).await {
         Ok(pool) => pool,
-        Err(resp) => return resp,
+        Err(resp) => return resp.into_response(),
     };
     let rows = sqlx::query_as::<_, AdminUserRow>(
         "SELECT id, user_code, email, first_name, last_name, country, national_id, status, is_admin, created_at \
