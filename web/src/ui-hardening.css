@@ -1,0 +1,33 @@
+:where(button,a,input,select,textarea,[tabindex]):focus-visible{outline:2px solid var(--cyan);outline-offset:3px;box-shadow:0 0 0 4px #70f6ff22}
+
+.status-pill--ok{border-color:#254c47;background:#0b2421;color:#8ff0c4}.status-pill--ok i{background:var(--green);box-shadow:0 0 12px var(--green)}
+.status-pill--warn{border-color:#5c4a22;background:#2b2414;color:#ffd37b}.status-pill--warn i{background:#ffd37b;box-shadow:0 0 12px #ffd37b}
+.status-pill--bad{border-color:#5a2530;background:#2a151c;color:#ff9fb2}.status-pill--bad i{background:var(--red);box-shadow:0 0 12px var(--red)}
+
+.runtime-banner,.guardian-panel{margin:18px 0 0;border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+.runtime-banner>div,.guardian-panel>div{display:grid;gap:4px}.runtime-banner b,.guardian-panel b{font-size:13px;letter-spacing:.04em}.runtime-banner span,.guardian-panel p{margin:0;color:#aebbd0;font-size:12px;line-height:1.5}.runtime-banner>strong,.guardian-panel>strong{font-size:24px}
+.runtime-banner--ok,.guardian-panel--ok{background:#0b2421;border-color:#254c47}.runtime-banner--ok>strong,.guardian-panel--ok>strong{color:var(--green)}
+.runtime-banner--warn,.guardian-panel--warn{background:#2b2414;border-color:#5c4a22}.runtime-banner--warn>strong,.guardian-panel--warn>strong{color:#ffd37b}
+.runtime-banner--bad,.runtime-banner--blocked,.guardian-panel--blocked{background:#2a151c;border-color:#5a2530}.runtime-banner--bad>strong,.runtime-banner--blocked>strong,.guardian-panel--blocked>strong{color:var(--red)}
+
+.metric-card--confidence{box-shadow:inset 0 2px #5b8cff55}.metric-card--risk{box-shadow:inset 0 2px #55e6a555}.metric-card--risk-blocked{box-shadow:inset 0 2px #ff6f8677;background:linear-gradient(145deg,#20101ae8,#0d101be8)!important}.metric-card--risk-blocked strong{color:#ff9fb2}
+
+.confidence-compare{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px}.confidence-compare .confidence-block{display:grid;gap:5px;border:1px solid var(--line);border-radius:12px;padding:14px;background:#09101d}.confidence-compare .confidence-block strong{font-size:26px}.confidence-compare .confidence-block small{color:var(--muted);font-size:10px}.confidence-block--historical strong{color:var(--green)}
+
+.guardian-panel{margin:20px 0}.guardian-panel .eyebrow{margin-bottom:2px}.guardian-panel p{max-width:900px}
+.decision-stats>div{min-width:0}.decision-stats small{display:block;color:var(--muted);font-size:9px;margin-top:4px}
+
+@media(max-width:700px){
+  .page-head{align-items:stretch;flex-direction:column}.page-head .system-pill{align-self:flex-start}
+  .runtime-banner,.guardian-panel{align-items:flex-start}.runtime-banner>strong,.guardian-panel>strong{font-size:20px}
+  .confidence-compare{grid-template-columns:1fr}
+  .market-table{overflow:visible}.market-row.table-head,.engine-head{display:none!important}
+  .market-row--responsive,.responsive-data-row{min-width:0!important;display:grid!important;grid-template-columns:1fr!important;gap:0!important;border:1px solid var(--line)!important;border-radius:12px!important;padding:6px 12px!important;margin:10px 0!important;background:#09101d!important}
+  .market-row--responsive>*[data-label],.responsive-data-row>*[data-label]{width:100%!important;display:flex!important;align-items:center!important;justify-content:space-between!important;gap:16px!important;padding:9px 0!important;border-bottom:1px solid #152137!important;text-align:right!important}
+  .market-row--responsive>*[data-label]:last-child,.responsive-data-row>*[data-label]:last-child{border-bottom:0!important}
+  .market-row--responsive>*[data-label]::before,.responsive-data-row>*[data-label]::before{content:attr(data-label);color:var(--muted);font-size:9px;letter-spacing:.08em;text-transform:uppercase;text-align:left;font-weight:500}
+  .market-row--responsive .decision{margin-left:auto}
+  .history-responsive-row{display:grid!important}
+}
+
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
