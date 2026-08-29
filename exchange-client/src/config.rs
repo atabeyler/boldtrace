@@ -3,46 +3,25 @@
 use crate::discovery::fetch_perpetual_symbols;
 use crate::error::Result;
 
-/// Sentinel value for `EXCHANGE_SYMBOLS` that means "discover and track
-/// every currently trading USDT perpetual future", rather than a fixed
-/// list that goes stale as Binance lists or delists symbols.
 const ALL_SYMBOLS: &str = "ALL";
 
-/// Configuration for connecting to Binance and publishing to Redis. A
-/// single process tracks any number of symbols concurrently, spread across
-/// as many WebSocket connections as needed to stay under Binance's
-/// per-connection stream limit.
 #[derive(Debug, Clone)]
 pub struct ExchangeClientConfig {
-    /// Trading symbols to subscribe to, e.g. `["BTCUSDT", "ETHUSDT"]`. A
-    /// single `"ALL"` entry means "resolve via `resolve_symbols` before
-    /// use" — callers that skip that step would otherwise try to open a
-    /// literal `ALL` stream, which fails loudly and obviously.
     pub symbols: Vec<String>,
-    /// Redis connection URL, e.g. `redis://127.0.0.1:6379`.
     pub redis_url: String,
-    /// Base URL for the Binance spot combined WebSocket stream. Candles and
-    /// order book depth come from spot, not futures: live verification
-    /// showed Binance's USDⓈ-M futures WS silently drops kline/markPrice/
-    /// aggTrade/ticker frames (confirmed with a raw client bypassing this
-    /// codebase entirely, from two independent networks — only depth and
-    /// bookTicker came through), while spot has run these exact streams
-    /// reliably in this product for weeks. Funding rate and open interest
-    /// still come from futures below since spot has neither.
+    /// Spot combined stream is used for klines.  BOLDTRACE deliberately
+    /// keeps candles on this proven feed while perpetual-market depth,
+    /// funding and open interest are sourced from futures endpoints.
     pub spot_ws_base: String,
-    /// Base URL for the Binance USDT-margined futures WebSocket stream
-    /// (funding rate only — see `spot_ws_base` for why candles/depth moved
-    /// off futures).
+    /// Binance USDⓈ-M futures combined stream for mark-price/funding and
+    /// perpetual order-book depth.
     pub futures_ws_base: String,
-    /// Base URL for the Binance USDT-margined futures REST API (used to
-    /// discover the tradable symbol universe, fetch funding rate history,
-    /// and poll open interest).
+    /// Binance USDⓈ-M REST API for symbol discovery, funding history and
+    /// open-interest polling.
     pub futures_rest_base: String,
 }
 
 impl ExchangeClientConfig {
-    /// Builds a config for `symbols` using Binance's public endpoints and
-    /// the given Redis URL.
     pub fn new(symbols: Vec<String>, redis_url: impl Into<String>) -> Self {
         Self {
             symbols,
@@ -53,29 +32,18 @@ impl ExchangeClientConfig {
         }
     }
 
-    /// Reads configuration from environment variables. `EXCHANGE_SYMBOLS`
-    /// (comma-separated, e.g. `BTCUSDT,ETHUSDT,SOLUSDT`, or `ALL` to track
-    /// every USDT perpetual future) is preferred; the older single-symbol
-    /// `EXCHANGE_SYMBOL` is still honored for deployments that haven't
-    /// switched over. Falls back to `BTCUSDT` and a local Redis instance
-    /// when unset.
     pub fn from_env() -> Self {
         let symbols = std::env::var("EXCHANGE_SYMBOLS")
             .or_else(|_| std::env::var("EXCHANGE_SYMBOL"))
             .unwrap_or_else(|_| "BTCUSDT".to_string());
-        let redis_url =
-            std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
+        let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
         Self::new(parse_symbols(&symbols), redis_url)
     }
 
-    /// Returns a clone with `symbols` replaced, for splitting one config
-    /// into per-connection chunks.
     pub fn with_symbols(&self, symbols: Vec<String>) -> Self {
         Self { symbols, ..self.clone() }
     }
 
-    /// If `symbols` is the `ALL` sentinel, replaces it with the live list
-    /// of tradable USDT perpetual futures from Binance. A no-op otherwise.
     pub async fn resolve_symbols(self) -> Result<Self> {
         if self.symbols == [ALL_SYMBOLS] {
             let symbols = fetch_perpetual_symbols(&self).await?;
@@ -87,9 +55,6 @@ impl ExchangeClientConfig {
     }
 }
 
-/// Splits, trims, uppercases and dedupes a comma-separated symbol list,
-/// preserving first-seen order. A bare `ALL` (any case) resolves to the
-/// single-element sentinel list regardless of what else was written.
 fn parse_symbols(raw: &str) -> Vec<String> {
     if raw.trim().eq_ignore_ascii_case(ALL_SYMBOLS) {
         return vec![ALL_SYMBOLS.to_string()];
@@ -105,15 +70,10 @@ fn parse_symbols(raw: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn parses_and_dedupes_symbol_list() {
-        assert_eq!(
-            parse_symbols(" btcusdt, ETHUSDT,btcusdt , solusdt"),
-            vec!["BTCUSDT", "ETHUSDT", "SOLUSDT"]
-        );
+        assert_eq!(parse_symbols(" btcusdt, ETHUSDT,btcusdt , solusdt"), vec!["BTCUSDT", "ETHUSDT", "SOLUSDT"]);
     }
-
     #[test]
     fn recognizes_all_sentinel_case_insensitively() {
         assert_eq!(parse_symbols("all"), vec!["ALL"]);

@@ -1,8 +1,8 @@
 //! Server-enforced email/password authentication for the web product.
-//! Sessions are HttpOnly cookies whose *hash* (not the raw bearer value) is
-//! persisted, so a database leak alone cannot be used to impersonate a
-//! live session.
+//! Sessions are HttpOnly cookies whose hash (not the raw bearer value) is
+//! persisted, so a database leak alone cannot impersonate a live session.
 
+use crate::state::AppState;
 use argon2::password_hash::rand_core::OsRng as PasswordOsRng;
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
@@ -15,7 +15,6 @@ use axum_extra::extract::CookieJar;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use crate::state::AppState;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use std::time::Duration as StdDuration;
@@ -62,18 +61,18 @@ pub(crate) struct UserRow {
 }
 
 impl From<UserRow> for AccountView {
-    fn from(r: UserRow) -> Self {
+    fn from(row: UserRow) -> Self {
         Self {
-            id: r.id,
-            user_code: r.user_code,
-            email: r.email,
-            first_name: r.first_name,
-            last_name: r.last_name,
-            language: r.language,
-            status: r.status,
-            is_admin: r.is_admin,
-            country: r.country,
-            national_id: r.national_id,
+            id: row.id,
+            user_code: row.user_code,
+            email: row.email,
+            first_name: row.first_name,
+            last_name: row.last_name,
+            language: row.language,
+            status: row.status,
+            is_admin: row.is_admin,
+            country: row.country,
+            national_id: row.national_id,
         }
     }
 }
@@ -102,17 +101,9 @@ fn is_valid_user_code(code: &str) -> bool {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginRequest {
-    /// Either the account's email or its user code — the caller doesn't
-    /// specify which; the server tells them apart by whether it contains
-    /// an `@`, since email addresses always do and user codes (alphanumeric
-    /// only, see `is_valid_user_code`) never can.
     pub identifier: String,
     pub password: String,
     pub remember_me: Option<bool>,
-    /// Optional browser Geolocation API coordinates. Purely informational —
-    /// recorded alongside a location alert for the admin to see, never used
-    /// to enforce the country check itself since it's a client-supplied,
-    /// spoofable signal. The IP-derived country is what's enforced.
     pub browser_lat: Option<f64>,
     pub browser_lon: Option<f64>,
 }
@@ -131,7 +122,7 @@ fn hash_password(password: &str) -> Option<String> {
     Argon2::default()
         .hash_password(password.as_bytes(), &salt)
         .ok()
-        .map(|h| h.to_string())
+        .map(|hash| hash.to_string())
 }
 
 fn verify_password(password: &str, hash: &str) -> bool {
@@ -144,9 +135,9 @@ fn verify_password(password: &str, hash: &str) -> bool {
 }
 
 fn random_hex(bytes: usize) -> String {
-    let mut buf = vec![0u8; bytes];
-    OsRng.fill_bytes(&mut buf);
-    buf.iter().map(|b| format!("{b:02x}")).collect()
+    let mut buffer = vec![0u8; bytes];
+    OsRng.fill_bytes(&mut buffer);
+    buffer.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn hash_token(token: &str) -> String {
@@ -167,7 +158,9 @@ fn session_cookie(secure: bool, token: String, remember_me: bool) -> Cookie<'sta
     cookie
 }
 
-pub(crate) fn require_pool(state: &AppState) -> Result<PgPool, (StatusCode, Json<ErrorBody>)> {
+pub(crate) fn require_pool(
+    state: &AppState,
+) -> Result<PgPool, (StatusCode, Json<ErrorBody>)> {
     state
         .pool
         .clone()
@@ -186,12 +179,14 @@ async fn create_session(
         } else {
             Duration::hours(DEFAULT_SESSION_HOURS)
         };
-    sqlx::query("INSERT INTO web_sessions (token_hash, user_id, expires_at) VALUES ($1, $2, $3)")
-        .bind(hash_token(&token))
-        .bind(user_id)
-        .bind(expires_at)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "INSERT INTO web_sessions (token_hash, user_id, expires_at) VALUES ($1, $2, $3)",
+    )
+    .bind(hash_token(&token))
+    .bind(user_id)
+    .bind(expires_at)
+    .execute(pool)
+    .await?;
     Ok(token)
 }
 
@@ -205,12 +200,14 @@ pub async fn register(
         Err(err) => return err.into_response(),
     };
     let email = req.email.trim().to_lowercase();
-    if !state
-        .auth_rate_limiter
-        .check(&format!("register:{email}"), REGISTER_MAX_ATTEMPTS, REGISTER_WINDOW)
-    {
+    if !state.auth_rate_limiter.check(
+        &format!("register:{email}"),
+        REGISTER_MAX_ATTEMPTS,
+        REGISTER_WINDOW,
+    ) {
         return error(StatusCode::TOO_MANY_REQUESTS, "rate_limited").into_response();
     }
+
     let first_name = req.first_name.trim().to_string();
     let last_name = req.last_name.trim().to_string();
     let country = req.country.trim().to_string();
@@ -238,12 +235,25 @@ pub async fn register(
     let language = req.language.unwrap_or_else(|| "en".into());
     let id = random_hex(16);
 
-    // A registration matching ADMIN_BOOTSTRAP_EMAIL is auto-approved and
-    // made an admin, so the very first admin account can be created without
-    // any prior admin existing to approve it.
-    let is_bootstrap_admin = std::env::var("ADMIN_BOOTSTRAP_EMAIL")
+    // Bootstrap admin is a first-install escape hatch only.  Keeping the env
+    // variable configured after production setup cannot mint another admin
+    // once any admin already exists.
+    let bootstrap_matches = std::env::var("ADMIN_BOOTSTRAP_EMAIL")
         .map(|bootstrap| bootstrap.trim().to_lowercase() == email)
         .unwrap_or(false);
+    let admin_exists = match sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM web_users WHERE is_admin = TRUE)",
+    )
+    .fetch_one(&pool)
+    .await
+    {
+        Ok(exists) => exists,
+        Err(err) => {
+            tracing::warn!(error=%err, "failed to evaluate bootstrap-admin state; failing closed");
+            true
+        }
+    };
+    let is_bootstrap_admin = bootstrap_matches && !admin_exists;
     let status = if is_bootstrap_admin { "approved" } else { "pending" };
 
     let result = sqlx::query_as::<_, UserRow>(&format!(
@@ -267,15 +277,20 @@ pub async fn register(
 
     let row = match result {
         Ok(row) => row,
-        Err(sqlx::Error::Database(db_err)) if db_err.constraint() == Some("web_users_email_key") => {
+        Err(sqlx::Error::Database(db_err))
+            if db_err.constraint() == Some("web_users_email_key") =>
+        {
             return error(StatusCode::CONFLICT, "email_taken").into_response();
         }
-        Err(sqlx::Error::Database(db_err)) if db_err.constraint() == Some("web_users_user_code_key") => {
+        Err(sqlx::Error::Database(db_err))
+            if db_err.constraint() == Some("web_users_user_code_key") =>
+        {
             return error(StatusCode::CONFLICT, "user_code_taken").into_response();
         }
         Err(err) => {
             tracing::warn!(error=%err, "failed to create web account");
-            return error(StatusCode::INTERNAL_SERVER_ERROR, "registration_failed").into_response();
+            return error(StatusCode::INTERNAL_SERVER_ERROR, "registration_failed")
+                .into_response();
         }
     };
 
@@ -289,11 +304,16 @@ pub async fn register(
     .execute(&pool)
     .await
     {
-        tracing::warn!(error=%err, "failed to record web consent");
+        tracing::warn!(error=%err, "failed to record web consent; rolling back account creation");
+        let _ = sqlx::query("DELETE FROM web_users WHERE id = $1")
+            .bind(&row.id)
+            .execute(&pool)
+            .await;
+        return error(StatusCode::INTERNAL_SERVER_ERROR, "registration_failed")
+            .into_response();
     }
 
     if row.status != "approved" {
-        // Pending accounts can't sign in yet, so no session is issued.
         crate::email::notify_admin_new_registration(
             &state.email,
             &row.first_name,
@@ -309,7 +329,8 @@ pub async fn register(
         Ok(token) => token,
         Err(err) => {
             tracing::warn!(error=%err, "failed to create session after registration");
-            return error(StatusCode::INTERNAL_SERVER_ERROR, "registration_failed").into_response();
+            return error(StatusCode::INTERNAL_SERVER_ERROR, "registration_failed")
+                .into_response();
         }
     };
     let jar = jar.add(session_cookie(state.secure_cookies, token, false));
@@ -328,11 +349,16 @@ pub async fn login(
     };
     let raw_identifier = req.identifier.trim();
     let is_email = raw_identifier.contains('@');
-    let identifier = if is_email { raw_identifier.to_lowercase() } else { raw_identifier.to_uppercase() };
-    if !state
-        .auth_rate_limiter
-        .check(&format!("login:{identifier}"), LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW)
-    {
+    let identifier = if is_email {
+        raw_identifier.to_lowercase()
+    } else {
+        raw_identifier.to_uppercase()
+    };
+    if !state.auth_rate_limiter.check(
+        &format!("login:{identifier}"),
+        LOGIN_MAX_ATTEMPTS,
+        LOGIN_WINDOW,
+    ) {
         return error(StatusCode::TOO_MANY_REQUESTS, "rate_limited").into_response();
     }
     let remember_me = req.remember_me.unwrap_or(false);
@@ -352,9 +378,6 @@ pub async fn login(
         }
     };
 
-    // Always run a verification so a missing account doesn't respond
-    // measurably faster than a wrong password (basic timing-side-channel
-    // hygiene); the dummy hash never matches any real password.
     const DUMMY_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHR2YWx1ZQ$Y5s+3d1n2mR3o8m3lQyN4dQY8FhQ0h4mQe6MYd3qXyE";
     let ok = match row.as_ref() {
         Some(user) => verify_password(&req.password, &user.password_hash),
@@ -368,7 +391,9 @@ pub async fn login(
     };
     match row.status.as_str() {
         "pending" => return error(StatusCode::FORBIDDEN, "account_pending").into_response(),
-        "rejected" => return error(StatusCode::FORBIDDEN, "account_rejected").into_response(),
+        "rejected" => {
+            return error(StatusCode::FORBIDDEN, "account_rejected").into_response();
+        }
         _ => {}
     }
 
@@ -409,12 +434,11 @@ pub async fn login(
                         &ip,
                     )
                     .await;
-                    return error(StatusCode::FORBIDDEN, "location_mismatch").into_response();
+                    return error(StatusCode::FORBIDDEN, "location_mismatch")
+                        .into_response();
                 }
             }
-            // Lookup failed (provider down, etc.): fail open, proceed with login.
         }
-        // No IP resolvable (e.g. local dev behind no proxy): fail open.
     }
 
     let token = match create_session(&pool, &row.id, remember_me).await {
@@ -442,9 +466,6 @@ pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
     (StatusCode::NO_CONTENT, jar)
 }
 
-/// Resolves the caller's session cookie to their user row, if any live
-/// session matches. Shared by `me` and the admin endpoints, which both need
-/// to know who's asking before answering.
 pub(crate) async fn session_user(
     pool: &PgPool,
     jar: &CookieJar,
@@ -454,7 +475,7 @@ pub(crate) async fn session_user(
     };
     let columns = USER_ROW_COLUMNS
         .split(", ")
-        .map(|c| format!("u.{c}"))
+        .map(|column| format!("u.{column}"))
         .collect::<Vec<_>>()
         .join(", ");
     sqlx::query_as::<_, UserRow>(&format!(
@@ -482,12 +503,15 @@ pub async fn me(State(state): State<AppState>, jar: CookieJar) -> impl IntoRespo
     }
 }
 
-/// Resolves the caller's session, or the error response to return if
-/// there isn't one. Shared by every endpoint below that requires a live
-/// session but isn't `me` itself.
-async fn require_session(pool: &PgPool, jar: &CookieJar) -> Result<UserRow, axum::response::Response> {
+async fn require_session(
+    pool: &PgPool,
+    jar: &CookieJar,
+) -> Result<UserRow, axum::response::Response> {
     match session_user(pool, jar).await {
-        Ok(Some(row)) => Ok(row),
+        Ok(Some(row)) if row.status == "approved" => Ok(row),
+        Ok(Some(_)) => {
+            Err(error(StatusCode::FORBIDDEN, "account_not_approved").into_response())
+        }
         Ok(None) => Err(error(StatusCode::UNAUTHORIZED, "not_authenticated").into_response()),
         Err(err) => {
             tracing::warn!(error=%err, "session lookup failed");
@@ -496,9 +520,6 @@ async fn require_session(pool: &PgPool, jar: &CookieJar) -> Result<UserRow, axum
     }
 }
 
-/// Everything about a profile that's safe for the account holder to edit
-/// themselves. Email is deliberately excluded — it's the login identifier
-/// and changing it needs re-verification this endpoint doesn't do.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileUpdateRequest {
@@ -520,7 +541,7 @@ pub async fn update_profile(
     };
     let current = match require_session(&pool, &jar).await {
         Ok(row) => row,
-        Err(resp) => return resp,
+        Err(response) => return response,
     };
     let first_name = req.first_name.trim().to_string();
     let last_name = req.last_name.trim().to_string();
@@ -547,7 +568,9 @@ pub async fn update_profile(
     .await;
     match result {
         Ok(row) => Json(AccountView::from(row)).into_response(),
-        Err(sqlx::Error::Database(db_err)) if db_err.constraint() == Some("web_users_user_code_key") => {
+        Err(sqlx::Error::Database(db_err))
+            if db_err.constraint() == Some("web_users_user_code_key") =>
+        {
             error(StatusCode::CONFLICT, "user_code_taken").into_response()
         }
         Err(err) => {
@@ -575,7 +598,7 @@ pub async fn change_password(
     };
     let current = match require_session(&pool, &jar).await {
         Ok(row) => row,
-        Err(resp) => return resp,
+        Err(response) => return response,
     };
     if !verify_password(&req.current_password, &current.password_hash) {
         return error(StatusCode::UNAUTHORIZED, "invalid_credentials").into_response();
@@ -595,22 +618,18 @@ pub async fn change_password(
         tracing::warn!(error=%err, "failed to update password");
         return error(StatusCode::INTERNAL_SERVER_ERROR, "update_failed").into_response();
     }
-    // Changing the password invalidates every *other* session, so a stolen
-    // password can't keep riding an old cookie once the real owner acts —
-    // the session making this request stays alive, since it just proved
-    // the current password. The password itself is already safely
-    // persisted at this point, so the revoke runs in the background
-    // instead of holding the response open on a second query.
     if let Some(cookie) = jar.get(SESSION_COOKIE) {
         let pool = pool.clone();
         let user_id = current.id.clone();
         let token_hash = hash_token(cookie.value());
         tokio::spawn(async move {
-            if let Err(err) = sqlx::query("DELETE FROM web_sessions WHERE user_id = $1 AND token_hash != $2")
-                .bind(&user_id)
-                .bind(&token_hash)
-                .execute(&pool)
-                .await
+            if let Err(err) = sqlx::query(
+                "DELETE FROM web_sessions WHERE user_id = $1 AND token_hash != $2",
+            )
+            .bind(&user_id)
+            .bind(&token_hash)
+            .execute(&pool)
+            .await
             {
                 tracing::warn!(error=%err, "failed to revoke other sessions after password change");
             }

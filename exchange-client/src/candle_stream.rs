@@ -1,25 +1,16 @@
-//! Connects to Binance's spot combined WebSocket stream for kline and
-//! order book depth updates, and republishes them to Redis. Deliberately
-//! spot rather than futures — see `ExchangeClientConfig::spot_ws_base` for
-//! why.
-
-use std::time::{SystemTime, UNIX_EPOCH};
+//! Connects to Binance spot combined WebSocket streams for closed klines and
+//! republishes candles to Redis. Order-book depth is sourced from perpetual
+//! futures in `funding_stream.rs` so microstructure and derivatives inputs
+//! describe the same leveraged venue.
 
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::backoff::ReconnectBackoff;
-use crate::binance_messages::{CombinedStreamEnvelope, DepthPayload, KlineEvent};
+use crate::binance_messages::{CombinedStreamEnvelope, KlineEvent};
 use crate::config::ExchangeClientConfig;
 use crate::error::Result;
 use crate::redis_publisher::RedisPublisher;
-
-fn current_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
-}
 
 fn candle_stream_url(config: &ExchangeClientConfig) -> String {
     let streams = config
@@ -27,56 +18,37 @@ fn candle_stream_url(config: &ExchangeClientConfig) -> String {
         .iter()
         .map(|s| {
             let symbol = s.to_lowercase();
-            format!("{symbol}@kline_1m/{symbol}@kline_5m/{symbol}@depth20@1000ms")
+            format!("{symbol}@kline_1m/{symbol}@kline_5m")
         })
         .collect::<Vec<_>>()
         .join("/");
     format!("{}?streams={streams}", config.spot_ws_base)
 }
 
-/// Runs the candle/depth stream connection forever, reconnecting with
-/// exponential backoff whenever the connection drops.
-pub async fn run_candle_stream(
-    config: &ExchangeClientConfig,
-    publisher: &mut RedisPublisher,
-) -> Result<()> {
+pub async fn run_candle_stream(config: &ExchangeClientConfig, publisher: &mut RedisPublisher) -> Result<()> {
     let mut backoff = ReconnectBackoff::default();
     loop {
         match run_candle_stream_once(config, publisher).await {
             Ok(()) => backoff.reset(),
-            Err(err) => {
-                tracing::warn!(error = %err, "candle stream connection lost, reconnecting");
-            }
+            Err(err) => tracing::warn!(error = %err, "candle stream connection lost, reconnecting"),
         }
         tokio::time::sleep(backoff.next_delay()).await;
     }
 }
 
-async fn run_candle_stream_once(
-    config: &ExchangeClientConfig,
-    publisher: &mut RedisPublisher,
-) -> Result<()> {
+async fn run_candle_stream_once(config: &ExchangeClientConfig, publisher: &mut RedisPublisher) -> Result<()> {
     let url = candle_stream_url(config);
-    tracing::info!(%url, "connecting to Binance spot candle/depth stream");
+    tracing::info!(%url, "connecting to Binance spot candle stream");
     let (ws_stream, _) = tokio_tungstenite::connect_async(url).await?;
     let (mut write, mut read) = ws_stream.split();
-
     while let Some(message) = read.next().await {
-        let message = message?;
-        match message {
-            Message::Text(text) => {
-                handle_candle_message(&text, publisher).await;
-            }
-            Message::Ping(payload) => {
-                write.send(Message::Pong(payload)).await?;
-            }
-            Message::Close(_) => {
-                return Err(crate::error::ExchangeClientError::ConnectionClosed);
-            }
+        match message? {
+            Message::Text(text) => handle_candle_message(&text, publisher).await,
+            Message::Ping(payload) => write.send(Message::Pong(payload)).await?,
+            Message::Close(_) => return Err(crate::error::ExchangeClientError::ConnectionClosed),
             _ => {}
         }
     }
-
     Err(crate::error::ExchangeClientError::ConnectionClosed)
 }
 
@@ -88,64 +60,37 @@ async fn handle_candle_message(text: &str, publisher: &mut RedisPublisher) {
             return;
         }
     };
-
-    if envelope.stream.contains("@kline") {
-        match serde_json::from_value::<KlineEvent>(envelope.data) {
-            Ok(event) => match event.into_candle() {
-                Ok(candle) => {
-                    if let Err(err) = publisher.publish_candle(&candle).await {
-                        tracing::warn!(error = %err, "failed to publish candle");
-                    }
+    if !envelope.stream.contains("@kline") {
+        return;
+    }
+    match serde_json::from_value::<KlineEvent>(envelope.data) {
+        Ok(event) if event.is_closed() => match event.into_candle() {
+            Ok(candle) => {
+                if let Err(err) = publisher.publish_candle(&candle).await {
+                    tracing::warn!(error = %err, "failed to publish candle");
                 }
-                Err(err) => tracing::warn!(error = %err, "failed to parse candle numeric fields"),
-            },
-            Err(err) => tracing::warn!(error = %err, "failed to parse kline event"),
+            }
+            Err(err) => tracing::warn!(error = %err, "failed to parse candle numeric fields"),
+        },
+        Ok(_) => {
+            // Ignore forming-candle updates. Decisions are based on immutable
+            // closed observations and therefore cannot repaint after alerting.
         }
-    } else if envelope.stream.contains("@depth") {
-        let symbol = envelope
-            .stream
-            .split('@')
-            .next()
-            .unwrap_or_default()
-            .to_uppercase();
-        match serde_json::from_value::<DepthPayload>(envelope.data) {
-            Ok(payload) => match payload.into_snapshot(symbol, current_millis()) {
-                Ok(snapshot) => {
-                    if let Err(err) = publisher.publish_order_book(&snapshot).await {
-                        tracing::warn!(error = %err, "failed to publish order book snapshot");
-                    }
-                }
-                Err(err) => tracing::warn!(error = %err, "failed to parse depth numeric fields"),
-            },
-            Err(err) => tracing::warn!(error = %err, "failed to parse depth payload"),
-        }
+        Err(err) => tracing::warn!(error = %err, "failed to parse kline event"),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn builds_expected_stream_url() {
         let config = ExchangeClientConfig::new(vec!["BTCUSDT".into()], "redis://127.0.0.1:6379");
-        let url = candle_stream_url(&config);
-        assert_eq!(
-            url,
-            "wss://stream.binance.com:9443/stream?streams=btcusdt@kline_1m/btcusdt@kline_5m/btcusdt@depth20@1000ms"
-        );
+        assert_eq!(candle_stream_url(&config), "wss://stream.binance.com:9443/stream?streams=btcusdt@kline_1m/btcusdt@kline_5m");
     }
-
     #[test]
     fn builds_combined_stream_url_for_multiple_symbols() {
-        let config = ExchangeClientConfig::new(
-            vec!["BTCUSDT".into(), "ETHUSDT".into()],
-            "redis://127.0.0.1:6379",
-        );
-        let url = candle_stream_url(&config);
-        assert_eq!(
-            url,
-            "wss://stream.binance.com:9443/stream?streams=btcusdt@kline_1m/btcusdt@kline_5m/btcusdt@depth20@1000ms/ethusdt@kline_1m/ethusdt@kline_5m/ethusdt@depth20@1000ms"
-        );
+        let config = ExchangeClientConfig::new(vec!["BTCUSDT".into(), "ETHUSDT".into()], "redis://127.0.0.1:6379");
+        assert_eq!(candle_stream_url(&config), "wss://stream.binance.com:9443/stream?streams=btcusdt@kline_1m/btcusdt@kline_5m/ethusdt@kline_1m/ethusdt@kline_5m");
     }
 }

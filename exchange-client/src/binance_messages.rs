@@ -1,11 +1,9 @@
-//! Wire types for Binance WebSocket and REST payloads, and their
-//! conversion into `shared` domain types.
+//! Wire types for Binance WebSocket and REST payloads, and conversion into
+//! shared BOLDTRACE domain types.
 
 use serde::Deserialize;
 use shared::{Candle, FundingRate, OrderBookLevel, OrderBookSnapshot};
 
-/// Envelope used by Binance's combined stream endpoint
-/// (`/stream?streams=a/b/c`): `{"stream": "<name>", "data": <payload>}`.
 #[derive(Debug, Deserialize)]
 pub struct CombinedStreamEnvelope<T> {
     pub stream: String,
@@ -38,9 +36,16 @@ pub struct KlinePayload {
     pub close: String,
     #[serde(rename = "v")]
     pub volume: String,
+    /// Binance `x`: true only for the final update of this candle.
+    #[serde(rename = "x")]
+    pub closed: bool,
 }
 
 impl KlineEvent {
+    pub fn is_closed(&self) -> bool {
+        self.kline.closed
+    }
+
     pub fn into_candle(self) -> Result<Candle, std::num::ParseFloatError> {
         Ok(Candle {
             symbol: self.symbol,
@@ -56,9 +61,8 @@ impl KlineEvent {
     }
 }
 
-/// Spot partial book depth payload (`<symbol>@depth20`). Binance does not
-/// embed the symbol or a timestamp in this payload, so both are supplied
-/// by the caller from the stream name and the local clock.
+/// Binance partial-book depth payload. The combined stream name identifies
+/// the symbol and the receiving runtime supplies an observation timestamp.
 #[derive(Debug, Deserialize)]
 pub struct DepthPayload {
     pub bids: Vec<[String; 2]>,
@@ -90,10 +94,6 @@ impl DepthPayload {
     }
 }
 
-/// Futures `markPriceUpdate` event, which carries the current funding
-/// rate (`r`). Funding rate is a perpetual-futures concept and does not
-/// exist on the Binance spot market, so this is read from the futures
-/// WebSocket rather than the spot one.
 #[derive(Debug, Deserialize)]
 pub struct MarkPriceEvent {
     #[serde(rename = "E")]
@@ -114,8 +114,6 @@ impl MarkPriceEvent {
     }
 }
 
-/// A single entry from the REST funding rate history endpoint
-/// (`GET /fapi/v1/fundingRate`).
 #[derive(Debug, Deserialize)]
 pub struct FundingRateHistoryEntry {
     pub symbol: String,
@@ -140,7 +138,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_kline_event() {
+    fn parses_kline_event_and_close_state() {
         let raw = r#"{
             "e": "kline", "E": 123456789, "s": "BTCUSDT",
             "k": {
@@ -150,6 +148,7 @@ mod tests {
             }
         }"#;
         let event: KlineEvent = serde_json::from_str(raw).unwrap();
+        assert!(!event.is_closed());
         let candle = event.into_candle().unwrap();
         assert_eq!(candle.symbol, "BTCUSDT");
         assert_eq!(candle.interval, "1m");
