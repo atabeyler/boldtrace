@@ -4,7 +4,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum ExchangeClientError {
     #[error("websocket error: {0}")]
-    WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
+    WebSocket(Box<tokio_tungstenite::tungstenite::Error>),
     #[error("json deserialization error: {0}")]
     Json(#[from] serde_json::Error),
     #[error("http request error: {0}")]
@@ -17,6 +17,12 @@ pub enum ExchangeClientError {
     InvalidPayload(String),
     #[error("connection closed by remote")]
     ConnectionClosed,
+}
+
+impl From<tokio_tungstenite::tungstenite::Error> for ExchangeClientError {
+    fn from(value: tokio_tungstenite::tungstenite::Error) -> Self {
+        Self::WebSocket(Box::new(value))
+    }
 }
 
 pub type Result<T> = std::result::Result<T, ExchangeClientError>;

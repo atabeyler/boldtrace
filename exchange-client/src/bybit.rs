@@ -113,7 +113,7 @@ async fn run_bybit_stream_once(
         })
         .collect::<Vec<_>>();
     write
-        .send(Message::Text(json!({"op":"subscribe","args":args}).to_string().into()))
+        .send(Message::Text(json!({"op":"subscribe","args":args}).to_string()))
         .await?;
     tracing::info!(count=config.symbols.len(), "connected to Bybit public linear stream");
 
@@ -124,7 +124,7 @@ async fn run_bybit_stream_once(
     loop {
         tokio::select! {
             _ = heartbeat.tick() => {
-                write.send(Message::Text(json!({"op":"ping"}).to_string().into())).await?;
+                write.send(Message::Text(json!({"op":"ping"}).to_string())).await?;
             }
             message = read.next() => {
                 let Some(message) = message else { return Err(ExchangeClientError::ConnectionClosed); };

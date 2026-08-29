@@ -81,6 +81,8 @@ async fn main() {
     let weights = score_engine::ScoreWeights::from_env();
     let (user_store, decision_ledger) = build_stores().await;
     let market_state = Arc::new(MarketState::new(weights));
+    debug_assert!(market_state.latest_score("__startup__").is_none());
+    debug_assert!(market_state.latest_derivatives("__startup__").is_none());
 
     // Persisted realized outcomes are the source of truth for adaptation.
     // Restore them before the live subscriber starts accepting new market

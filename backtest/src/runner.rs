@@ -27,7 +27,11 @@ pub struct BacktestCosts {
 
 impl Default for BacktestCosts {
     fn default() -> Self {
-        Self { round_trip_fee_pct: 0.0, slippage_pct: 0.0, funding_pct: 0.0 }
+        Self {
+            round_trip_fee_pct: 0.0,
+            slippage_pct: 0.0,
+            funding_pct: 0.0,
+        }
     }
 }
 
@@ -80,6 +84,16 @@ pub struct HistoricalMarketFrame {
     pub open_interest: Option<OpenInterest>,
 }
 
+struct ResultMeta {
+    symbol: String,
+    interval: String,
+    scope: &'static str,
+    score_threshold: f64,
+    lookahead_hours: i64,
+    costs: BacktestCosts,
+    no_trade_points: usize,
+}
+
 fn side_from_score(score: f64, long_threshold: f64) -> Option<BacktestSide> {
     let short_threshold = 100.0 - long_threshold;
     if score >= long_threshold {
@@ -91,41 +105,39 @@ fn side_from_score(score: f64, long_threshold: f64) -> Option<BacktestSide> {
     }
 }
 
-fn result_from_signals(
-    symbol: String,
-    interval: String,
-    scope: &str,
-    score_threshold: f64,
-    lookahead_hours: i64,
-    costs: BacktestCosts,
-    no_trade_points: usize,
-    signals: Vec<BacktestSignal>,
-) -> BacktestResult {
+fn result_from_signals(meta: ResultMeta, signals: Vec<BacktestSignal>) -> BacktestResult {
     let total_signals = signals.len();
-    let long_signals = signals.iter().filter(|s| s.side == BacktestSide::Long).count();
-    let short_signals = signals.iter().filter(|s| s.side == BacktestSide::Short).count();
+    let long_signals = signals
+        .iter()
+        .filter(|signal| signal.side == BacktestSide::Long)
+        .count();
+    let short_signals = signals
+        .iter()
+        .filter(|signal| signal.side == BacktestSide::Short)
+        .count();
     let win_rate = if total_signals == 0 {
         0.0
     } else {
-        signals.iter().filter(|s| s.win).count() as f64 / total_signals as f64 * 100.0
+        signals.iter().filter(|signal| signal.win).count() as f64 / total_signals as f64 * 100.0
     };
     let average_return_pct = if total_signals == 0 {
         0.0
     } else {
-        signals.iter().map(|s| s.return_pct).sum::<f64>() / total_signals as f64
+        signals.iter().map(|signal| signal.return_pct).sum::<f64>() / total_signals as f64
     };
+
     BacktestResult {
-        symbol,
-        interval,
-        scope: scope.into(),
-        score_threshold,
-        short_threshold: 100.0 - score_threshold,
-        lookahead_hours,
-        costs,
+        symbol: meta.symbol,
+        interval: meta.interval,
+        scope: meta.scope.into(),
+        score_threshold: meta.score_threshold,
+        short_threshold: 100.0 - meta.score_threshold,
+        lookahead_hours: meta.lookahead_hours,
+        costs: meta.costs,
         total_signals,
         long_signals,
         short_signals,
-        no_trade_points,
+        no_trade_points: meta.no_trade_points,
         win_rate,
         average_return_pct,
         signals,
@@ -134,29 +146,32 @@ fn result_from_signals(
 
 fn record_signal(
     candles: &[Candle],
-    i: usize,
+    index: usize,
     score: f64,
     side: BacktestSide,
     lookahead_hours: i64,
     costs: BacktestCosts,
 ) -> Option<BacktestSignal> {
-    // The signal only exists after candle i closes. The next candle's open
-    // is the earliest execution price available without look-ahead bias.
-    let entry_candle = candles.get(i + 1)?;
-    let target_time = candles[i].close_time + lookahead_hours * 3_600_000;
-    let exit_candle = candles[i + 1..]
+    // The signal only exists after candle `index` closes. The next candle's
+    // open is the earliest execution price available without look-ahead bias.
+    let current = candles.get(index)?;
+    let entry_candle = candles.get(index + 1)?;
+    let target_time = current.close_time + lookahead_hours * 3_600_000;
+    let exit_candle = candles[index + 1..]
         .iter()
         .find(|candle| candle.close_time >= target_time)?;
     if entry_candle.open <= 0.0 || exit_candle.close <= 0.0 {
         return None;
     }
+
     let gross_market_return_pct = (exit_candle.close / entry_candle.open - 1.0) * 100.0;
     let direction = if side == BacktestSide::Long { 1.0 } else { -1.0 };
     let gross_directional_return_pct = gross_market_return_pct * direction;
     let net_return_pct = gross_directional_return_pct - costs.total();
+
     Some(BacktestSignal {
-        symbol: candles[i].symbol.clone(),
-        timestamp: candles[i].close_time,
+        symbol: current.symbol.clone(),
+        timestamp: current.close_time,
         score,
         side,
         entry_price: entry_candle.open,
@@ -190,8 +205,14 @@ pub fn run_backtest_with_costs(
     lookahead_hours: i64,
     costs: BacktestCosts,
 ) -> BacktestResult {
-    let symbol = candles.first().map(|c| c.symbol.clone()).unwrap_or_default();
-    let interval = candles.first().map(|c| c.interval.clone()).unwrap_or_default();
+    let symbol = candles
+        .first()
+        .map(|candle| candle.symbol.clone())
+        .unwrap_or_default();
+    let interval = candles
+        .first()
+        .map(|candle| candle.interval.clone())
+        .unwrap_or_default();
     let threshold = score_threshold.clamp(50.0, 100.0);
     let mut signals = Vec::new();
     let mut previous_side = None;
@@ -199,20 +220,22 @@ pub fn run_backtest_with_costs(
 
     if candles.len() < SCORE_WINDOW + 1 {
         return result_from_signals(
-            symbol,
-            interval,
-            "candle-only",
-            threshold,
-            lookahead_hours,
-            costs,
-            0,
+            ResultMeta {
+                symbol,
+                interval,
+                scope: "candle-only",
+                score_threshold: threshold,
+                lookahead_hours,
+                costs,
+                no_trade_points: 0,
+            },
             signals,
         );
     }
 
-    for i in (SCORE_WINDOW - 1)..candles.len() - 1 {
-        let window = &candles[i + 1 - SCORE_WINDOW..=i];
-        let current = &candles[i];
+    for index in (SCORE_WINDOW - 1)..candles.len() - 1 {
+        let window = &candles[index + 1 - SCORE_WINDOW..=index];
+        let current = &candles[index];
         let input = score_engine::ScoreInput {
             candles: window.to_vec(),
             order_book: OrderBookSnapshot {
@@ -232,29 +255,33 @@ pub fn run_backtest_with_costs(
         if side.is_none() {
             no_trade_points += 1;
         }
-        if side.is_some() && side != previous_side {
-            if let Some(signal) = record_signal(
-                candles,
-                i,
-                score.value,
-                side.expect("side checked above"),
-                lookahead_hours,
-                costs,
-            ) {
-                signals.push(signal);
+        if side != previous_side {
+            if let Some(current_side) = side {
+                if let Some(signal) = record_signal(
+                    candles,
+                    index,
+                    score.value,
+                    current_side,
+                    lookahead_hours,
+                    costs,
+                ) {
+                    signals.push(signal);
+                }
             }
         }
         previous_side = side;
     }
 
     result_from_signals(
-        symbol,
-        interval,
-        "candle-only",
-        threshold,
-        lookahead_hours,
-        costs,
-        no_trade_points,
+        ResultMeta {
+            symbol,
+            interval,
+            scope: "candle-only",
+            score_threshold: threshold,
+            lookahead_hours,
+            costs,
+            no_trade_points,
+        },
         signals,
     )
 }
@@ -267,8 +294,14 @@ pub fn run_full_backtest(
     costs: BacktestCosts,
 ) -> BacktestResult {
     let candles: Vec<Candle> = frames.iter().map(|frame| frame.candle.clone()).collect();
-    let symbol = candles.first().map(|c| c.symbol.clone()).unwrap_or_default();
-    let interval = candles.first().map(|c| c.interval.clone()).unwrap_or_default();
+    let symbol = candles
+        .first()
+        .map(|candle| candle.symbol.clone())
+        .unwrap_or_default();
+    let interval = candles
+        .first()
+        .map(|candle| candle.interval.clone())
+        .unwrap_or_default();
     let threshold = score_threshold.clamp(50.0, 100.0);
     let mut signals = Vec::new();
     let mut previous_side = None;
@@ -277,36 +310,41 @@ pub fn run_full_backtest(
 
     if frames.len() < SCORE_WINDOW + 1 {
         return result_from_signals(
-            symbol,
-            interval,
-            "full-market-frame",
-            threshold,
-            lookahead_hours,
-            costs,
-            0,
+            ResultMeta {
+                symbol,
+                interval,
+                scope: "full-market-frame",
+                score_threshold: threshold,
+                lookahead_hours,
+                costs,
+                no_trade_points: 0,
+            },
             signals,
         );
     }
 
-    for i in 0..frames.len() - 1 {
-        if let Some(oi) = frames[i].open_interest.clone() {
+    for index in 0..frames.len() - 1 {
+        if let Some(oi) = frames[index].open_interest.clone() {
             oi_history.push_back(oi);
             while oi_history.len() > 2 {
                 oi_history.pop_front();
             }
         }
-        if i + 1 < SCORE_WINDOW {
+        if index + 1 < SCORE_WINDOW {
             continue;
         }
 
-        let frame = &frames[i];
-        let window = &candles[i + 1 - SCORE_WINDOW..=i];
-        let book = frame.order_book.clone().unwrap_or_else(|| OrderBookSnapshot {
-            symbol: frame.candle.symbol.clone(),
-            timestamp: 0,
-            bids: vec![],
-            asks: vec![],
-        });
+        let frame = &frames[index];
+        let window = &candles[index + 1 - SCORE_WINDOW..=index];
+        let book = frame
+            .order_book
+            .clone()
+            .unwrap_or_else(|| OrderBookSnapshot {
+                symbol: frame.candle.symbol.clone(),
+                timestamp: 0,
+                bids: vec![],
+                asks: vec![],
+            });
         let funding = frame.funding_rate.clone().unwrap_or_else(|| FundingRate {
             symbol: frame.candle.symbol.clone(),
             timestamp: 0,
@@ -321,15 +359,21 @@ pub fn run_full_backtest(
             weights,
         );
 
-        let previous_oi = if oi_history.len() >= 2 { oi_history.front() } else { None };
+        let previous_oi = if oi_history.len() >= 2 {
+            oi_history.front()
+        } else {
+            None
+        };
         let current_oi = oi_history.back();
-        let price_change = if window.len() >= 2 && window[window.len() - 2].close > 0.0 {
-            (window.last().expect("non-empty window").close / window[window.len() - 2].close - 1.0)
-                * 100.0
+        let previous_candle = &window[window.len() - 2];
+        let current_candle = &window[window.len() - 1];
+        let price_change = if previous_candle.close > 0.0 {
+            (current_candle.close / previous_candle.close - 1.0) * 100.0
         } else {
             0.0
         };
-        let derivatives = score_engine::derivatives(previous_oi, current_oi, &funding, price_change);
+        let derivatives =
+            score_engine::derivatives(previous_oi, current_oi, &funding, price_change);
         let source_health = [
             score_engine::DataSourceHealth {
                 name: "candles".into(),
@@ -342,7 +386,7 @@ pub fn run_full_backtest(
                 age_ms: frame
                     .order_book
                     .as_ref()
-                    .map(|x| frame.candle.close_time.saturating_sub(x.timestamp))
+                    .map(|value| frame.candle.close_time.saturating_sub(value.timestamp))
                     .unwrap_or(i64::MAX),
                 max_age_ms: 30_000,
                 present: frame.order_book.is_some(),
@@ -352,7 +396,7 @@ pub fn run_full_backtest(
                 age_ms: frame
                     .funding_rate
                     .as_ref()
-                    .map(|x| frame.candle.close_time.saturating_sub(x.timestamp))
+                    .map(|value| frame.candle.close_time.saturating_sub(value.timestamp))
                     .unwrap_or(i64::MAX),
                 max_age_ms: 9 * 60 * 60 * 1_000,
                 present: frame.funding_rate.is_some(),
@@ -360,7 +404,7 @@ pub fn run_full_backtest(
             score_engine::DataSourceHealth {
                 name: "open_interest".into(),
                 age_ms: current_oi
-                    .map(|x| frame.candle.close_time.saturating_sub(x.timestamp))
+                    .map(|value| frame.candle.close_time.saturating_sub(value.timestamp))
                     .unwrap_or(i64::MAX),
                 max_age_ms: 5 * 60 * 1_000,
                 present: oi_history.len() >= 2,
@@ -377,7 +421,7 @@ pub fn run_full_backtest(
             derivatives.derivatives_score - 50.0,
         ];
         let signal_quality = score_engine::signal_quality(&evidence);
-        let volumes: Vec<f64> = window.iter().map(|c| c.volume).collect();
+        let volumes: Vec<f64> = window.iter().map(|candle| candle.volume).collect();
         let anomaly = score_engine::anomaly_zscore(
             &volumes[..volumes.len() - 1],
             volumes[volumes.len() - 1],
@@ -412,37 +456,47 @@ pub fn run_full_backtest(
 
         let side = match decision.decision {
             score_engine::Decision::StrongLong | score_engine::Decision::Long
-                if score.value >= threshold => Some(BacktestSide::Long),
+                if score.value >= threshold =>
+            {
+                Some(BacktestSide::Long)
+            }
             score_engine::Decision::StrongShort | score_engine::Decision::Short
-                if score.value <= 100.0 - threshold => Some(BacktestSide::Short),
+                if score.value <= 100.0 - threshold =>
+            {
+                Some(BacktestSide::Short)
+            }
             _ => None,
         };
         if side.is_none() {
             no_trade_points += 1;
         }
-        if side.is_some() && side != previous_side {
-            if let Some(signal) = record_signal(
-                &candles,
-                i,
-                score.value,
-                side.expect("side checked above"),
-                lookahead_hours,
-                costs,
-            ) {
-                signals.push(signal);
+        if side != previous_side {
+            if let Some(current_side) = side {
+                if let Some(signal) = record_signal(
+                    &candles,
+                    index,
+                    score.value,
+                    current_side,
+                    lookahead_hours,
+                    costs,
+                ) {
+                    signals.push(signal);
+                }
             }
         }
         previous_side = side;
     }
 
     result_from_signals(
-        symbol,
-        interval,
-        "full-market-frame",
-        threshold,
-        lookahead_hours,
-        costs,
-        no_trade_points,
+        ResultMeta {
+            symbol,
+            interval,
+            scope: "full-market-frame",
+            score_threshold: threshold,
+            lookahead_hours,
+            costs,
+            no_trade_points,
+        },
         signals,
     )
 }
@@ -452,12 +506,12 @@ mod tests {
     use super::*;
     use score_engine::ScoreWeights;
 
-    fn candle(i: i64, close: f64, volume: f64) -> Candle {
+    fn candle(index: i64, close: f64, volume: f64) -> Candle {
         Candle {
             symbol: "BTCUSDT".into(),
             interval: "1h".into(),
-            open_time: i * 3_600_000,
-            close_time: i * 3_600_000 + 3_600_000,
+            open_time: index * 3_600_000,
+            close_time: index * 3_600_000 + 3_600_000,
             open: close,
             high: close,
             low: close,
@@ -486,7 +540,11 @@ mod tests {
             20.0,
             BacktestSide::Short,
             2,
-            BacktestCosts { round_trip_fee_pct: 0.1, slippage_pct: 0.1, funding_pct: 0.0 },
+            BacktestCosts {
+                round_trip_fee_pct: 0.1,
+                slippage_pct: 0.1,
+                funding_pct: 0.0,
+            },
         )
         .unwrap();
         assert!(signal.gross_directional_return_pct > 0.0);
@@ -497,7 +555,13 @@ mod tests {
     #[test]
     fn candle_only_scope_is_explicit() {
         let candles: Vec<Candle> = (0..60)
-            .map(|i| candle(i, 100.0 + i as f64, if i == 50 { 100_000.0 } else { 100.0 }))
+            .map(|index| {
+                candle(
+                    index,
+                    100.0 + index as f64,
+                    if index == 50 { 100_000.0 } else { 100.0 },
+                )
+            })
             .collect();
         let result = run_backtest(&candles, &ScoreWeights::default(), 70.0, 4);
         assert_eq!(result.scope, "candle-only");
