@@ -14,7 +14,12 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    tracing::info!(count = config.symbols.len(), symbols = %config.symbols.join(","), "starting exchange-client");
+    tracing::info!(
+        provider = config.provider.as_str(),
+        count = config.symbols.len(),
+        symbols = %config.symbols.join(","),
+        "starting exchange-client"
+    );
 
     if let Err(err) = exchange_client::run(config).await {
         tracing::error!(error = %err, "exchange-client exited with an error");

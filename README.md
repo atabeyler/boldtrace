@@ -10,19 +10,17 @@ advice.
 ![License](https://img.shields.io/badge/license-Boldtrace%20Custom-lightgrey)
 ![Build](https://github.com/atabeyler/boldtrace/actions/workflows/ci.yml/badge.svg)
 
-## License
-
-This project is licensed under the Boldtrace Custom License — see `LICENSE`.
-
 ## Architecture
 
 BOLDTRACE is a Cargo workspace plus a React web client:
 
 - `shared` — common market/domain types.
-- `exchange-client` — Binance public-market ingestion and Redis publication.
-  Spot is used for the proven kline feed; USDⓈ-M futures supplies perpetual
-  order-book depth, funding and open interest so microstructure and
-  derivatives signals refer to the same leveraged venue.
+- `exchange-client` — public market ingestion and Redis publication. Select
+  `EXCHANGE_PROVIDER=binance` (default) or `EXCHANGE_PROVIDER=bybit`.
+  Binance uses closed spot klines plus USDⓈ-M perpetual depth/funding/OI;
+  Bybit uses its V5 public linear feed for closed klines, perpetual depth,
+  funding and open interest. Both adapters publish the same shared domain
+  objects and Redis channels.
 - `score-engine` — deterministic scoring, data-quality/risk primitives,
   market intelligence, specialized engines, confidence calibration and
   bounded adaptive weights.
@@ -43,31 +41,51 @@ Target runtime flow:
 
 `Exchange -> source health -> MarketState -> score -> risk/no-trade gate -> outcome/adaptive learning -> PostgreSQL/Redis -> API -> Web + Telegram`
 
-See `AGENTS.md` / `CLAUDE.md` for the product contract.
+## Confidence semantics
+
+`Meta Confidence` is the live model's internal confidence score. It is **not**
+a direct probability that a trade will win. Historical win rate is calculated
+only from realized outcomes and is displayed separately with its sample count;
+the Command Center suppresses probability-style presentation until at least 30
+realized samples exist for the selected horizon.
 
 ## Setup / development
 
 ```bash
 cargo build --workspace --all-targets
 cargo test --workspace
-cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 
 cd web
 npm ci
+npm test
 npm run build
 ```
 
 Copy `.env.example` to a local `.env` and configure secrets locally. Never
-commit production credentials. PostgreSQL migrations live in `/migrations`
-and are applied by the Rust services that own persistence.
+commit production credentials. PostgreSQL migrations live in `/migrations`.
+
+### Exchange selection
+
+```bash
+# Binance (default)
+EXCHANGE_PROVIDER=binance
+EXCHANGE_SYMBOLS=BTCUSDT,ETHUSDT
+
+# Bybit V5 linear perpetual adapter
+EXCHANGE_PROVIDER=bybit
+EXCHANGE_SYMBOLS=BTCUSDT,ETHUSDT
+
+# Discover all active USDT perpetuals from the selected provider at startup
+EXCHANGE_SYMBOLS=ALL
+```
 
 ## Backtest execution assumptions
 
-The default CLI remains deliberately conservative about claims: if only
-historical candles are supplied, the exported result says `scope:
-"candle-only"`; it must not be presented as validation of the complete live
-engine. Configure explicit execution assumptions when evaluating net returns:
+If only historical candles are supplied, the exported result says
+`scope: "candle-only"`; it must not be presented as validation of the complete
+live engine. Configure explicit execution assumptions when evaluating net
+returns:
 
 ```bash
 BACKTEST_ROUND_TRIP_FEE_PCT=0.08 \
@@ -76,25 +94,27 @@ BACKTEST_FUNDING_PCT=0.00 \
 cargo run -p backtest
 ```
 
-The values above are only an invocation example, not recommended or assumed
-exchange fees. Use the actual fee tier, slippage model and funding applicable
-to the tested market.
+For full-input historical validation set `BACKTEST_FRAMES_JSON` to an archive
+containing timestamp-aligned candle, order-book, funding and open-interest
+observations.
 
 ## Docker / deployment
 
 The repository uses a multi-stage `Dockerfile` with one target per deployable
-service:
+service. Production deployment target is Northflank; see `NORTHFLANK.md`.
+Runtime containers execute as the non-root `boldtrace` user.
 
-```bash
-docker build --target bot -t boldtrace-bot .
-docker build --target exchange-client -t boldtrace-exchange-client .
-docker build --target backtest -t boldtrace-backtest .
-docker build --target product-api -t boldtrace-product-api .
-```
+## CI policy
 
-Production deployment target is Northflank; see `NORTHFLANK.md` for service
-configuration and environment variables.
+GitHub Actions runs only on pushes to `main`. The Rust job builds/tests/clippy
+checks the workspace and performs a secret scan. The web job uses `npm ci`,
+the dependency audit, Node-based unit tests and the production TypeScript/Vite
+build. Development branches therefore do not consume Actions minutes.
 
 ## Supported languages
 
 `en`, `tr`, `fr`, `de`, `ar`, `ru`
+
+## License
+
+This project is licensed under the Boldtrace Custom License — see `LICENSE`.

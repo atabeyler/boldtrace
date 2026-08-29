@@ -1,4 +1,5 @@
 import { useIntelligence } from '../api/useIntelligence';
+import { isFresh } from '../domain/market';
 import { useI18n } from '../i18n';
 import type { Copy } from '../i18n';
 
@@ -7,7 +8,7 @@ export function IntelligenceTerminal() {
   const { t } = useI18n();
   if (loading && !data) return <State t={t} title={t.itConnecting} />;
   if (!data) return <State t={t} title={t.itUnavailable} detail={error || undefined} action={refresh} />;
-  const stale = data.freshnessMs > 45_000;
+  const stale = !isFresh(data.freshnessMs);
   return <div className="page">
     <div className="page-head">
       <div><span className="eyebrow">{t.itEyebrowPrefix} {data.symbol}</span><h1>{t.itTitle}</h1><p>{t.itSub}</p></div>
@@ -17,7 +18,7 @@ export function IntelligenceTerminal() {
     <div className="terminal-grid">
       <section className="panel decision-card">
         <span className="eyebrow">{t.itMetaDecision}</span><h2 className="hero-decision">{data.decision}</h2>
-        <div className="decision-stats"><div><span>{t.colConfidence}</span><b>{data.confidence.toFixed(1)}%</b></div><div><span>{t.colRisk}</span><b>{data.risk.toFixed(1)}%</b></div><div><span>{t.ccQualityLabel}</span><b>{data.quality.toFixed(1)}%</b></div></div>
+        <div className="decision-stats"><div><span>{t.ccMetaConfidence}</span><b>{data.confidence.toFixed(1)}%</b></div><div><span>{t.colRisk}</span><b>{data.risk.toFixed(1)}%</b></div><div><span>{t.ccQualityLabel}</span><b>{data.quality.toFixed(1)}%</b></div></div>
         <div className={data.decision === 'NO TRADE' ? 'guardian-warn' : 'guardian-ok'}>◇ {t.itRiskGuardian} — {data.decision === 'NO TRADE' ? t.itTradeBlocked : t.itDecisionActive}</div>
       </section>
       <section className="panel chart-placeholder">
