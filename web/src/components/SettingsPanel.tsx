@@ -3,7 +3,7 @@ const langs:[Lang,string][]=[['tr','Türkçe'],['en','English'],['de','Deutsch']
 export function SettingsPanel({onOpenSettings,onClose}:{onOpenSettings?:()=>void;onClose:()=>void}){
   const{t,lang,setLang}=useI18n();
   return <div className="popover settings-panel-dropdown">
-    <span className="eyebrow">{t.settingsLanguage}</span>
+    <div className="popover-head"><span className="eyebrow">{t.settingsLanguage}</span><button className="popover-close" onClick={onClose} aria-label={t.closePanel}>✕</button></div>
     <div className="settings-panel-langs">
       {langs.map(([code,label])=><button key={code} className={lang===code?'active':''} dir={code==='ar'?'rtl':'ltr'} onClick={()=>setLang(code)}>
         <span>{label}</span>{lang===code&&<span aria-hidden="true">✓</span>}

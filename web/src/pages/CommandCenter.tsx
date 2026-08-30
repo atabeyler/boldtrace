@@ -26,8 +26,8 @@ export function CommandCenter() {
 
   return <div className="page workstation-page">
     <div className="workstation-grid">
-      <aside className="ws-pane ws-watchlist">
-        <div className="ws-pane-head"><strong>{t.navScanner}</strong><span>{watchlist?.length ?? 0}</span></div>
+      <details className="ws-pane ws-watchlist" open>
+        <summary className="ws-pane-head"><strong>{t.navScanner}</strong><span>{watchlist?.length ?? 0}</span></summary>
         <div className="ws-watch-search"><i aria-hidden="true">⌕</i><input type="search" value={watchQuery} onChange={e => setWatchQuery(e.target.value)} placeholder={t.ccWatchlistSearch} aria-label={t.ccWatchlistSearch} /></div>
         <div className="ws-watch-tabs"><span>{t.colMarket}</span><span>{t.colDecision}</span><span>{t.colRisk}</span></div>
         <div className="ws-watchlist-body">
@@ -38,7 +38,7 @@ export function CommandCenter() {
           </div>)}
           {!scanner.loading && (!watchlist || watchlist.length === 0) && <div className="ws-side-copy" style={{padding:10}}>{scanner.error || (scanner.data?.length ? t.ccWatchlistNoMatch : t.scannerUnavailable)}</div>}
         </div>
-      </aside>
+      </details>
 
       <main className="ws-pane ws-center">
         <div className="ws-marketbar">

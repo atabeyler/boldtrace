@@ -3,6 +3,7 @@ export function MenuPanel({onNavigate,onClose}:{onNavigate?:(id:string)=>void;on
   const{t}=useI18n();
   const go=(id:string)=>{onNavigate?.(id);onClose()};
   return <div className="popover menu-panel">
+    <button className="popover-close" onClick={onClose} aria-label={t.closePanel}>✕</button>
     <div className="menu-panel-brand"><Brand compact/><small>{t.footer}</small></div>
     {onNavigate&&<div className="menu-panel-links">
       <button onClick={()=>go('settings')}>{t.navSettings}</button>

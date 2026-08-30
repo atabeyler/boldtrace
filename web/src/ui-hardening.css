@@ -1,5 +1,11 @@
 :where(button,a,input,select,textarea,[tabindex]):focus-visible{outline:2px solid var(--cyan);outline-offset:3px;box-shadow:0 0 0 4px #70f6ff22}
 
+.popover{z-index:60}
+.popover-backdrop{position:fixed;top:0;left:0;right:0;bottom:0;z-index:59;background:transparent;border:0;padding:0;cursor:default}
+button.popover-close{position:absolute;top:10px;inset-inline-end:10px;border:1px solid var(--line);background:transparent;color:var(--muted);width:26px!important;height:26px;border-radius:6px;display:grid!important;place-items:center;font-size:11px;line-height:1;padding:0!important;text-align:center!important}
+.popover-close:hover{background:var(--surface2, #10182b);color:#fff}
+.popover-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+
 .status-pill--ok{border-color:#254c47;background:#0b2421;color:#8ff0c4}.status-pill--ok i{background:var(--green);box-shadow:0 0 12px var(--green)}
 .status-pill--warn{border-color:#5c4a22;background:#2b2414;color:#ffd37b}.status-pill--warn i{background:#ffd37b;box-shadow:0 0 12px #ffd37b}
 .status-pill--bad{border-color:#5a2530;background:#2a151c;color:#ff9fb2}.status-pill--bad i{background:var(--red);box-shadow:0 0 12px var(--red)}
