@@ -1,0 +1,102 @@
+/* Final contrast layer. Keep text semantics readable in both explicit and system-resolved themes. */
+:root,
+html[data-theme="dark"]{
+  --app-text:#f4f7fb;
+  --app-text-2:#d3dbe6;
+  --app-muted:#a1aec0;
+  --app-muted-2:#8290a3;
+}
+
+html[data-theme="light"]{
+  --app-text:#111827;
+  --app-text-2:#2f3d50;
+  --app-muted:#526176;
+  --app-muted-2:#68778a;
+}
+
+/* Primary and secondary copy */
+.page,.panel,.metric-grid article,.engine-card,.performance-horizon-card,.ops-market-card,
+.auth-card,.settings-panel,.popover,.menu-panel,.settings-panel-dropdown,
+.admin-table,.alert-list article,.health-grid>div{color:var(--app-text)}
+
+.page-head p,.terminal-copy,.reason-list,.premium-risk-reason,.premium-explanation-item,
+.security-note,.auth-hero p,.setting-line small,.settings-panel small,.sidebar-status,
+.workspace-context small,.engine-card-meta,.performance-horizon-card small,
+.performance-return,.ops-market-stats span,.alert-list article span,.alert-list article small,
+.history-table small,.admin-row small,.admin-row-users small{color:var(--app-muted)}
+
+.eyebrow,.nav-group-title,.workspace-kicker,.premium-mini-stat span,.premium-engine-chip span,
+.premium-performance-cell span,.premium-performance-cell small,.premium-terminal-score span,
+.engine-card-head span,.performance-horizon-card>span{color:var(--app-muted-2)}
+
+/* Previously hardcoded dark-theme descendants */
+.premium-freshness,.premium-regime,.premium-decision-label span,.premium-risk-gauge span,
+.premium-engine-chip span,.premium-performance-cell span,.premium-performance-cell small,
+.premium-terminal-score span,.premium-explanation-item,.premium-explanation-index,
+.panel-head b,.panel-head strong,.market-state{color:var(--app-muted)}
+.premium-freshness b,.premium-symbol strong,.premium-mini-stat b,.premium-risk-title h2,
+.premium-risk-gauge strong,.premium-engine-chip strong,.premium-performance-cell strong,
+.premium-terminal-score b,.premium-price,.hero-decision{color:var(--app-text)}
+.premium-symbol small{color:var(--app-muted)}
+.premium-decision-value.no-trade{color:var(--app-text-2)}
+
+/* Navigation and toolbar */
+.nav-item{color:var(--app-muted)}
+.nav-item:hover,.nav-item.active{color:var(--app-text)}
+.icon-button{color:var(--app-muted)}
+.icon-button:hover{color:var(--app-text)}
+.profile-button,.profile-button strong{color:var(--app-text)}
+.profile-button small{color:var(--app-muted)}
+.theme-cycle{color:var(--app-text-2)}
+
+/* Forms and settings */
+label{color:var(--app-text-2)}
+input,select,textarea,.language-select{color:var(--app-text);background:var(--app-input)}
+input::placeholder,textarea::placeholder{color:var(--app-muted)}
+option{color:var(--app-text);background:var(--app-surface)}
+.setting-line b,.setting-line-header b,.settings-panel h2{color:var(--app-text)}
+.setting-line button,.settings-nav button,.primary-small{color:var(--app-text-2)}
+.settings-nav button:hover,.setting-line button:hover,.primary-small:hover{color:var(--app-text)}
+.settings-nav button.active{color:var(--app-accent)}
+button:disabled,input:disabled,select:disabled{opacity:.68}
+
+/* Tables, admin, operational submodules */
+.engine-row,.admin-row,.admin-row-users,.history-table>div{color:var(--app-text-2)}
+.engine-row strong,.engine-row b,.admin-row strong,.admin-row b,.admin-row-users strong,
+.admin-row-users b,.history-table b,.history-table strong,.alert-list article strong,
+.health-grid strong{color:var(--app-text)}
+.engine-head,.admin-head,.table-head{color:var(--app-muted)}
+.health-grid span{color:var(--app-muted)}
+
+/* Popovers and menus */
+.popover button,.profile-menu button,.menu-panel button,.settings-panel-dropdown button{color:var(--app-text-2)}
+.popover button:hover,.profile-menu button:hover,.menu-panel button:hover,.settings-panel-dropdown button:hover{color:var(--app-text);background:var(--app-surface-2)}
+
+/* Decision and state colors keep semantic distinction while retaining contrast. */
+.healthy,.health-text{color:var(--app-positive)}
+.stale,.health-text-warn{color:var(--app-warning)}
+.health-text-bad,.auth-error{color:var(--app-danger)}
+
+html[data-theme="dark"] .decision.long{color:#7ae4bd}
+html[data-theme="dark"] .decision.short{color:#ff9cad}
+html[data-theme="dark"] .decision.watch{color:#f1cc79}
+html[data-theme="dark"] .decision.no-trade{color:#c4ced9}
+html[data-theme="dark"] .premium-risk-state{color:#b7c4d3}
+html[data-theme="dark"] .premium-risk-state.blocked{color:#ff9cad}
+
+html[data-theme="light"] .decision.long{color:#066847}
+html[data-theme="light"] .decision.short{color:#a92f43}
+html[data-theme="light"] .decision.watch{color:#754900}
+html[data-theme="light"] .decision.no-trade{color:#435166}
+html[data-theme="light"] .premium-risk-state{color:#435166;background:#edf2f7}
+html[data-theme="light"] .premium-risk-state.blocked{color:#a92f43;background:#fbe9ed}
+html[data-theme="light"] .auth-pending{color:#066847}
+html[data-theme="light"] .auth-error{color:#a92f43}
+
+/* Make fine-print text usable; avoid sub-10px body copy in dense submodules. */
+.setting-line small,.alert-list article span,.alert-list article small,.history-table small,
+.engine-card-meta,.performance-return,.ops-market-stats span,.premium-risk-reason,
+.premium-explanation-item{font-size:10px}
+
+/* Selection should remain visible in both themes. */
+::selection{background:color-mix(in srgb,var(--app-accent) 28%,transparent);color:var(--app-text)}
