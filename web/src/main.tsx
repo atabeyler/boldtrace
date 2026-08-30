@@ -1,4 +1,4 @@
-import React,{useEffect,useState}from'react';import{createRoot}from'react-dom/client';import{I18nProvider}from'./i18n';import{AuthPage}from'./pages/AuthPage';import{CommandCenter}from'./pages/CommandCenter';import{IntelligenceTerminal}from'./pages/IntelligenceTerminal';import{EngineMatrix}from'./pages/EngineMatrix';import{SettingsPage}from'./pages/SettingsPage';import{PerformanceCenter}from'./pages/PerformanceCenter';import{LearningCenter}from'./pages/LearningCenter';import{MarketScanner,AlertsPage,HistoryPage,SystemHealth}from'./pages/OperationsPages';import{AdminPage}from'./pages/AdminPage';import{AppShell}from'./components/AppShell';import{api}from'./api/client';import type{Account}from'./api/contracts';import'./styles.css';import'./ui-hardening.css';import'./premium-interface.css';import'./premium-surfaces.css';
+import React,{useEffect,useState}from'react';import{createRoot}from'react-dom/client';import{I18nProvider}from'./i18n';import{ThemeProvider}from'./theme';import{AuthPage}from'./pages/AuthPage';import{CommandCenter}from'./pages/CommandCenter';import{IntelligenceTerminal}from'./pages/IntelligenceTerminal';import{EngineMatrix}from'./pages/EngineMatrix';import{SettingsPage}from'./pages/SettingsPage';import{PerformanceCenter}from'./pages/PerformanceCenter';import{LearningCenter}from'./pages/LearningCenter';import{MarketScanner,AlertsPage,HistoryPage,SystemHealth}from'./pages/OperationsPages';import{AdminPage}from'./pages/AdminPage';import{AppShell}from'./components/AppShell';import{api}from'./api/client';import type{Account}from'./api/contracts';import'./styles.css';import'./ui-hardening.css';import'./premium-interface.css';import'./premium-surfaces.css';import'./theme-system.css';import'./theme-controls.css';
 
 function App(){
   const[account,setAccount]=useState<Account|null|undefined>(undefined);
@@ -14,4 +14,4 @@ function App(){
   return <AppShell active={page} onNavigate={setPage} onSignOut={signOut} isAdmin={account.isAdmin} accountLabel={account.firstName||account.userCode}>{views[page]??<CommandCenter/>}</AppShell>;
 }
 
-createRoot(document.getElementById('root')!).render(<React.StrictMode><I18nProvider><App/></I18nProvider></React.StrictMode>);
+createRoot(document.getElementById('root')!).render(<React.StrictMode><I18nProvider><ThemeProvider><App/></ThemeProvider></I18nProvider></React.StrictMode>);
