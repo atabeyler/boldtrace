@@ -14,6 +14,5 @@
   .workspace-topbar,.topbar{height:48px!important;padding:0 12px!important}
   .workspace-context .workspace-kicker{display:none}.workspace-context small{display:none}.workspace-context strong{font-size:11px!important}
   .theme-cycle{height:30px!important;min-width:30px!important;padding:0 7px!important}.theme-cycle b{display:none}.icon-button{height:30px!important;min-width:30px!important}.profile-button{padding:2px 5px!important}.profile-button>span{width:25px!important;height:25px!important}.profile-button div{display:none}
-  .footer{display:none}
 }
 @media(max-width:700px){.workspace-content,.content{padding:0!important}.workspace-topbar,.topbar{height:48px!important}.workstation-page{padding:0!important}}

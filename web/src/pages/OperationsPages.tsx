@@ -3,6 +3,7 @@ import { useApi } from '../api/useApi';
 import { api } from '../api/client';
 import { useI18n } from '../i18n';
 import type { Copy } from '../i18n';
+import { healthStatusClass, scannerStatusLabel } from '../domain/market';
 
 export function MarketScanner() {
   const { t } = useI18n();
@@ -10,7 +11,7 @@ export function MarketScanner() {
   return <Page t={t} title={t.scannerTitle} sub={t.scannerSub}>
     {loading && !data && <section className="panel empty-state" role="status"><h2>{t.scannerLoading}</h2></section>}
     {!loading && (!data || data.length === 0) && <section className="panel empty-state" role={error ? 'alert' : 'status'}><h2>{t.scannerUnavailable}</h2><p>{error}</p></section>}
-    {data && data.length > 0 && <section className="ops-card-grid">{data.map(x => <article className="ops-market-card" key={x.symbol}><header><strong>{x.symbol}</strong><span className={x.status === 'live' ? 'healthy' : 'stale'}>{x.status === 'live' ? `● ${t.statusLive}` : x.status === 'stale' ? `○ ${t.itDataStale}` : `○ ${t.statusUnavailable}`}</span></header><div className={`ops-market-decision decision ${x.market?.decision.toLowerCase().replaceAll(' ','-')??'no-trade'}`}>{x.market?.decision ?? '—'}</div><div className="ops-market-stats"><div><span>{t.colConfidence}</span><b>{x.market ? `${x.market.confidence.toFixed(0)}%` : '—'}</b></div><div><span>{t.colRisk}</span><b>{x.market ? `${x.market.risk.toFixed(0)}%` : '—'}</b></div></div></article>)}</section>}
+    {data && data.length > 0 && <section className="ops-card-grid">{data.map(x => <article className="ops-market-card" key={x.symbol}><header><strong>{x.symbol}</strong><span className={x.status === 'live' ? 'healthy' : 'stale'}>{x.status === 'live' ? '● ' : '○ '}{scannerStatusLabel(x.status, t)}</span></header><div className={`ops-market-decision decision ${x.market?.decision.toLowerCase().replaceAll(' ','-')??'no-trade'}`}>{x.market?.decision ?? '—'}</div><div className="ops-market-stats"><div><span>{t.colConfidence}</span><b>{x.market ? `${x.market.confidence.toFixed(0)}%` : '—'}</b></div><div><span>{t.colRisk}</span><b>{x.market ? `${x.market.risk.toFixed(0)}%` : '—'}</b></div></div></article>)}</section>}
   </Page>;
 }
 
@@ -32,11 +33,9 @@ export function SystemHealth() {
   return <Page t={t} title={t.healthTitle} sub={t.healthSub}>
     {loading && !data && <section className="panel empty-state" role="status"><h2>{t.healthLoading}</h2></section>}
     {!loading && (!data || data.length === 0) && <section className="panel empty-state" role="alert"><h2>{t.healthUnavailable}</h2><p>{error}</p></section>}
-    {data && data.length > 0 && <><section className="metric-grid">{data.map(s => <article key={s.name}><span>{s.name}</span><strong className={statusClass(s.status)}>{s.status.toUpperCase()}</strong><small>{s.freshnessMs !== undefined && s.freshnessMs !== null ? `${Math.round(s.freshnessMs / 1000)}s` : s.latencyMs !== undefined && s.latencyMs !== null ? `${s.latencyMs}ms` : t.healthNominal}</small></article>)}</section><section className="panel"><div className="health-grid">{data.map(s => <div key={s.name}><i className={statusClass(s.status)} aria-hidden="true" /><strong>{s.name}</strong><span>{s.status === 'healthy' ? t.healthOperational : s.status === 'degraded' ? t.healthDegraded : t.healthOffline}</span></div>)}</div></section></>}
+    {data && data.length > 0 && <><section className="metric-grid">{data.map(s => <article key={s.name}><span>{s.name}</span><strong className={healthStatusClass(s.status)}>{s.status.toUpperCase()}</strong><small>{s.freshnessMs !== undefined && s.freshnessMs !== null ? `${Math.round(s.freshnessMs / 1000)}s` : s.latencyMs !== undefined && s.latencyMs !== null ? `${s.latencyMs}ms` : t.healthNominal}</small></article>)}</section><section className="panel"><div className="health-grid">{data.map(s => <div key={s.name}><i className={healthStatusClass(s.status)} aria-hidden="true" /><strong>{s.name}</strong><span>{s.status === 'healthy' ? t.healthOperational : s.status === 'degraded' ? t.healthDegraded : t.healthOffline}</span></div>)}</div></section></>}
   </Page>;
 }
-
-function statusClass(status: string) { return status === 'healthy' ? 'health-text' : status === 'degraded' ? 'health-text-warn' : 'health-text-bad'; }
 
 function Page({ t, title, sub, children }: { t: Copy; title: string; sub: string; children: ReactNode }) {
   return <div className="page"><div className="page-head"><div><span className="eyebrow">{t.opsEyebrow}</span><h1>{title}</h1><p>{sub}</p></div></div>{children}</div>;

@@ -1,3 +1,5 @@
+import type { Copy } from '../i18n';
+
 export interface HistoricalPerformancePoint {
   horizon: string;
   winRate: number;
@@ -18,4 +20,12 @@ export function historicalPoint(
 
 export function hasMeaningfulHistory(point: HistoricalPerformancePoint | undefined, minimumSamples = 30): boolean {
   return Boolean(point && point.samples >= minimumSamples && Number.isFinite(point.winRate));
+}
+
+export function healthStatusClass(status: string): string {
+  return status === 'healthy' ? 'health-text' : status === 'degraded' ? 'health-text-warn' : 'health-text-bad';
+}
+
+export function scannerStatusLabel(status: 'live' | 'stale' | 'unavailable', t: Copy): string {
+  return status === 'live' ? t.statusLive : status === 'stale' ? t.itDataStale : t.statusUnavailable;
 }

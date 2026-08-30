@@ -1,7 +1,7 @@
 import { api } from '../api/client';
 import { useApi } from '../api/useApi';
 import { useIntelligence } from '../api/useIntelligence';
-import { hasMeaningfulHistory, historicalPoint, isFresh } from '../domain/market';
+import { hasMeaningfulHistory, healthStatusClass, historicalPoint, isFresh, scannerStatusLabel } from '../domain/market';
 import { useI18n } from '../i18n';
 
 export function CommandCenter() {
@@ -27,7 +27,7 @@ export function CommandCenter() {
         <div className="ws-watch-tabs"><span className="active">{t.colMarket}</span><span>{t.colStatus}</span></div>
         <div className="ws-watchlist-body">
           {scanner.data?.map(item => <div className="ws-watch-row" key={item.symbol}>
-            <div className="ws-watch-symbol"><strong>{item.symbol}</strong><small>{item.status === 'live' ? t.statusLive : item.status === 'stale' ? t.itDataStale : t.statusUnavailable}</small></div>
+            <div className="ws-watch-symbol"><strong>{item.symbol}</strong><small>{scannerStatusLabel(item.status, t)}</small></div>
             <div className={`ws-watch-decision decision ${item.market?.decision.toLowerCase().replaceAll(' ','-') ?? 'no-trade'}`}>{item.market?.decision ?? '—'}</div>
             <div className="ws-watch-risk">{item.market ? `${item.market.risk.toFixed(0)}%` : '—'}</div>
           </div>)}
@@ -38,6 +38,7 @@ export function CommandCenter() {
       <main className="ws-pane ws-center">
         <div className="ws-marketbar">
           <div className="ws-market-identity"><strong>{data.symbol}</strong><small>{stale ? t.itDataStale : t.itDataFresh}</small></div>
+          <button className={`system-pill ${error ? 'status-pill--bad' : stale ? 'status-pill--warn' : 'status-pill--ok'}`} onClick={refresh} aria-label={t.retryConnection}><i />{error ? t.itConnectionDegraded : stale ? t.itDataStale : t.itDataFresh}</button>
           <div className="ws-market-metric"><span>{t.colMarket}</span><b>{data.price > 0 ? `$${data.price.toLocaleString()}` : '—'}</b></div>
           <div className="ws-market-metric"><span>{t.colRegime}</span><b>{data.regime}</b></div>
           <div className="ws-market-metric"><span>{t.ccQualityLabel}</span><b>{data.quality.toFixed(1)}%</b></div>
@@ -105,7 +106,7 @@ export function CommandCenter() {
         <div className="ws-system">
           <div className="ws-pane-head"><strong>{t.navHealth}</strong><span>{health.data?.length ?? 0}</span></div>
           <div className="ws-system-body">
-            {health.data?.slice(0,6).map(item => <div className="ws-system-metric" key={item.name}><span>{item.name}</span><b className={item.status === 'healthy' ? 'health-text' : item.status === 'degraded' ? 'health-text-warn' : 'health-text-bad'}>{item.status.toUpperCase()}</b></div>)}
+            {health.data?.slice(0,6).map(item => <div className="ws-system-metric" key={item.name}><span>{item.name}</span><b className={healthStatusClass(item.status)}>{item.status.toUpperCase()}</b></div>)}
           </div>
         </div>
       </section>
