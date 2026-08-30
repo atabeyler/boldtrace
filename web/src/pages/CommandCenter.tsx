@@ -1,6 +1,7 @@
 import { api } from '../api/client';
 import { useApi } from '../api/useApi';
 import { useIntelligence } from '../api/useIntelligence';
+import { CandleChart } from '../components/CandleChart';
 import { hasMeaningfulHistory, healthStatusClass, historicalPoint, isFresh, scannerStatusLabel } from '../domain/market';
 import { useI18n } from '../i18n';
 
@@ -47,13 +48,8 @@ export function CommandCenter() {
 
         <div className="ws-main-workbench">
           <section className="ws-evidence-board">
-            <div className="ws-evidence-header"><div><span>{t.ccEngineConsensus}</span><strong>{data.engines.length} {t.ccLiveEngines}</strong></div><b>{data.confidence.toFixed(1)}%</b></div>
-            <div className="ws-spectrum" aria-label={t.ccEngineConsensus}>
-              {data.engines.map(engine => <div className="ws-spectrum-col" key={engine.name} title={`${engine.name}: ${engine.score.toFixed(1)}`}>
-                <div className="ws-spectrum-bar-wrap"><i className="ws-spectrum-bar" style={{height:`${Math.max(4, Math.min(100, engine.score))}%`}} /></div>
-                <span>{engine.name}</span><b>{engine.score.toFixed(0)}</b>
-              </div>)}
-            </div>
+            <div className="ws-evidence-header"><div><span>{t.ccChartTitle}</span><strong>{data.symbol}</strong></div><b>{data.price > 0 ? `$${data.price.toLocaleString()}` : '—'}</b></div>
+            <CandleChart symbol={data.symbol} />
           </section>
 
           <aside className="ws-decision-dock">

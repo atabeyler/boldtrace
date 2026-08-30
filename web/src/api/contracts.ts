@@ -6,6 +6,7 @@ export interface ServiceHealth{name:string;status:Health;freshnessMs?:number|nul
 export interface IntelligenceSnapshot{market:MarketDecision;performance:PerformanceSummary[];services:ServiceHealth[]}
 export interface DecisionHistoryItem{id:string;symbol:string;decision:Decision;confidence:number;horizon:string;realizedReturn?:number;outcome?:'WIN'|'LOSS'|'PENDING';createdAt:string}
 export interface ScannerEntry{symbol:string;status:'live'|'stale'|'unavailable';market:MarketDecision|null}
+export interface Candle{openTime:number;closeTime:number;open:number;high:number;low:number;close:number;volume:number}
 export interface AlertItem{id:string;severity:'CRITICAL'|'HIGH'|'WATCH'|'INFO';symbol:string;decision:Decision|string;confidence:number;createdAt:string}
 export interface EngineReliability{name:string;reliability:number}
 export interface LearningState{samples:number;minSampleGate:number;weightMin:number;weightMax:number;engines:EngineReliability[]}

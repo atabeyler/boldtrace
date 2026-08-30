@@ -3,6 +3,7 @@ mod adapter;
 mod admin;
 mod alerts;
 mod auth;
+mod candles;
 mod email;
 mod geoip;
 mod history;
@@ -102,6 +103,7 @@ fn api_router(state: AppState) -> Router {
         .route("/api/v1/learning/:symbol", get(learning::learning))
         .route("/api/v1/alerts", get(alerts::alerts))
         .route("/api/v1/history", get(history::history))
+        .route("/api/v1/candles/:symbol", get(candles::candles))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             access::require_product_access,
@@ -131,9 +133,10 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
-    let live = env::var("REDIS_URL")
-        .ok()
-        .and_then(|url| LiveStore::new(&url).ok());
+    let redis_url_env = env::var("REDIS_URL").ok();
+    let live = redis_url_env
+        .as_deref()
+        .and_then(|url| LiveStore::new(url).ok());
     let pool = match env::var("DATABASE_URL") {
         Ok(database_url) => match PgPoolOptions::new().max_connections(10).connect(&database_url).await {
             Ok(pool) => match sqlx::migrate!("../migrations").run(&pool).await {
@@ -153,6 +156,9 @@ async fn main() {
             None
         }
     };
+    if let (Some(pool), Some(redis_url)) = (pool.clone(), redis_url_env.clone()) {
+        candles::spawn_ingestion(pool, redis_url, scan_symbols().unwrap_or_else(|| vec!["BTCUSDT".to_string()]));
+    }
     let secure_cookies = env::var("COOKIE_SECURE")
         .map(|value| value != "false")
         .unwrap_or(true);
