@@ -1,88 +1,12 @@
-import {useState} from 'react';import {Brand} from '../components/Brand';import {MenuPanel} from '../components/MenuPanel';import {SettingsPanel} from '../components/SettingsPanel';import {Footer} from '../components/Footer';import {useI18n} from '../i18n';import {api,ApiError} from '../api/client';import type {Account} from '../api/contracts';import {sortedCountries} from '../countries';
+import {useState} from 'react';import {Brand} from '../components/Brand';import {Footer} from '../components/Footer';import {LanguageSelector} from '../components/LanguageSelector';import {ThemeSelector} from '../components/ThemeSelector';import {useI18n} from '../i18n';import {api,ApiError} from '../api/client';import type {Account} from '../api/contracts';import {sortedCountries} from '../countries';
 
-const ERROR_KEYS:Record<string,'errorInvalidInput'|'errorTermsRequired'|'errorEmailTaken'|'errorInvalidCredentials'|'errorServiceUnavailable'|'errorRateLimited'|'errorInvalidUserCode'|'errorUserCodeTaken'|'errorAccountPending'|'errorAccountRejected'|'errorLocationMismatch'>={
-  invalid_input:'errorInvalidInput',
-  terms_not_accepted:'errorTermsRequired',
-  email_taken:'errorEmailTaken',
-  invalid_credentials:'errorInvalidCredentials',
-  database_unavailable:'errorServiceUnavailable',
-  rate_limited:'errorRateLimited',
-  invalid_user_code:'errorInvalidUserCode',
-  user_code_taken:'errorUserCodeTaken',
-  account_pending:'errorAccountPending',
-  account_rejected:'errorAccountRejected',
-  location_mismatch:'errorLocationMismatch',
-};
+const ERROR_KEYS:Record<string,'errorInvalidInput'|'errorTermsRequired'|'errorEmailTaken'|'errorInvalidCredentials'|'errorServiceUnavailable'|'errorRateLimited'|'errorInvalidUserCode'|'errorUserCodeTaken'|'errorAccountPending'|'errorAccountRejected'|'errorLocationMismatch'>={invalid_input:'errorInvalidInput',terms_not_accepted:'errorTermsRequired',email_taken:'errorEmailTaken',invalid_credentials:'errorInvalidCredentials',database_unavailable:'errorServiceUnavailable',rate_limited:'errorRateLimited',invalid_user_code:'errorInvalidUserCode',user_code_taken:'errorUserCodeTaken',account_pending:'errorAccountPending',account_rejected:'errorAccountRejected',location_mismatch:'errorLocationMismatch'};
 
-/// Best-effort browser Geolocation read: resolves `null` (never rejects) on
-/// missing permission, no API support, or timeout, since this is only an
-/// informational signal attached to the login request, never a requirement.
-function currentPosition(timeoutMs=3000):Promise<{lat:number;lon:number}|null>{
-  return new Promise(resolve=>{
-    if(!('geolocation' in navigator)){resolve(null);return}
-    let settled=false;
-    const finish=(v:{lat:number;lon:number}|null)=>{if(!settled){settled=true;resolve(v)}};
-    const timer=setTimeout(()=>finish(null),timeoutMs);
-    navigator.geolocation.getCurrentPosition(
-      pos=>{clearTimeout(timer);finish({lat:pos.coords.latitude,lon:pos.coords.longitude})},
-      ()=>{clearTimeout(timer);finish(null)},
-      {timeout:timeoutMs},
-    );
-  });
-}
+function currentPosition(timeoutMs=3000):Promise<{lat:number;lon:number}|null>{return new Promise(resolve=>{if(!('geolocation' in navigator)){resolve(null);return}let settled=false;const finish=(v:{lat:number;lon:number}|null)=>{if(!settled){settled=true;resolve(v)}};const timer=setTimeout(()=>finish(null),timeoutMs);navigator.geolocation.getCurrentPosition(pos=>{clearTimeout(timer);finish({lat:pos.coords.latitude,lon:pos.coords.longitude})},()=>{clearTimeout(timer);finish(null)},{timeout:timeoutMs})})}
 
 export function AuthPage({onAuthenticated}:{onAuthenticated:(account:Account)=>void}){
-  const{t,lang}=useI18n();
-  const[mode,setMode]=useState<'login'|'register'>('login');
-  const[busy,setBusy]=useState(false);
-  const[error,setError]=useState<string|null>(null);
-  const[pending,setPending]=useState(false);
-  const[open,setOpen]=useState<'menu'|'settings'|null>(null);
-  const toggle=(panel:'menu'|'settings')=>setOpen(v=>v===panel?null:panel);
-  const countries=sortedCountries(lang);
+  const{t,lang}=useI18n();const[mode,setMode]=useState<'login'|'register'>('login');const[busy,setBusy]=useState(false);const[error,setError]=useState<string|null>(null);const[pending,setPending]=useState(false);const countries=sortedCountries(lang);
+  const submit=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();setError(null);setBusy(true);const form=new FormData(e.currentTarget);try{if(mode==='login'){const position=await currentPosition();const account=await api.login({identifier:String(form.get('identifier')||''),password:String(form.get('password')||''),rememberMe:form.get('rememberMe')==='on',browserLat:position?.lat,browserLon:position?.lon});onAuthenticated(account)}else{const account=await api.register({firstName:String(form.get('firstName')||''),lastName:String(form.get('lastName')||''),userCode:String(form.get('userCode')||''),country:String(form.get('country')||''),nationalId:String(form.get('nationalId')||''),email:String(form.get('email')||''),password:String(form.get('password')||''),language:lang,termsAccepted:form.get('termsAccepted')==='on'});if(account.status==='approved'){onAuthenticated(account)}else{setPending(true);setMode('login')}}}catch(err){const code=err instanceof ApiError?err.code:'errorGeneric';setError(t[ERROR_KEYS[code]??'errorGeneric'])}finally{setBusy(false)}};
 
-  const submit=async(e:React.FormEvent<HTMLFormElement>)=>{
-    e.preventDefault();
-    setError(null);
-    setBusy(true);
-    const form=new FormData(e.currentTarget);
-    try{
-      if(mode==='login'){
-        const position=await currentPosition();
-        const account=await api.login({
-          identifier:String(form.get('identifier')||''),
-          password:String(form.get('password')||''),
-          rememberMe:form.get('rememberMe')==='on',
-          browserLat:position?.lat,
-          browserLon:position?.lon,
-        });
-        onAuthenticated(account);
-      }else{
-        const account=await api.register({
-          firstName:String(form.get('firstName')||''),
-          lastName:String(form.get('lastName')||''),
-          userCode:String(form.get('userCode')||''),
-          country:String(form.get('country')||''),
-          nationalId:String(form.get('nationalId')||''),
-          email:String(form.get('email')||''),
-          password:String(form.get('password')||''),
-          language:lang,
-          termsAccepted:form.get('termsAccepted')==='on',
-        });
-        if(account.status==='approved'){
-          onAuthenticated(account);
-        }else{
-          setPending(true);
-          setMode('login');
-        }
-      }
-    }catch(err){
-      const code=err instanceof ApiError?err.code:'errorGeneric';
-      setError(t[ERROR_KEYS[code]??'errorGeneric']);
-    }finally{
-      setBusy(false);
-    }
-  };
-
-  return <div className="auth-page"><div className="auth-grid"/><header className="auth-header"><Brand/><div className="top-actions"><button type="button" className="icon-button" onClick={()=>toggle('menu')} aria-label={t.menuTooltip} title={t.menuTooltip}>☰</button><button type="button" className="icon-button" onClick={()=>toggle('settings')} aria-label={t.navSettings} title={t.navSettings}>⚙</button>{open==='menu'&&<MenuPanel onClose={()=>setOpen(null)}/>}{open==='settings'&&<SettingsPanel onClose={()=>setOpen(null)}/>}</div></header><section className="auth-hero"><div className="eyebrow"><span/>BOLDTRACE / INTELLIGENCE ACCESS</div><h1>{t.welcome}</h1><p>{t.subtitle}</p><div className="boot-strip"><span>MARKET FEEDS <b>ONLINE</b></span><span>RISK GUARDIAN <b>ACTIVE</b></span><span>ADAPTIVE LEARNING <b>READY</b></span></div></section><section className="auth-panel"><div className="auth-card"><div className="auth-tabs"><button type="button" className={mode==='login'?'active':''} onClick={()=>{setMode('login');setError(null);setPending(false)}}>{t.login}</button><button type="button" className={mode==='register'?'active':''} onClick={()=>{setMode('register');setError(null);setPending(false)}}>{t.register}</button></div>{pending&&<div className="auth-pending" role="status"><b>{t.pendingApprovalTitle}</b><p>{t.pendingApprovalBody}</p></div>}<form onSubmit={submit}>{mode==='register'&&<><label>{t.firstName}<input required name="firstName" autoComplete="given-name" placeholder={t.firstName}/></label><label>{t.lastName}<input required name="lastName" autoComplete="family-name" placeholder={t.lastName}/></label><label>{t.userCode}<input required name="userCode" minLength={4} maxLength={20} pattern="[A-Za-z0-9]{4,20}" placeholder={t.userCode} title={t.userCodeHint}/></label><label>{t.country}<select required name="country" defaultValue=""><option value="" disabled>{t.country}</option>{countries.map(c=><option key={c.code} value={c.code}>{c.name}</option>)}</select></label><label>{t.nationalId}<input required name="nationalId" placeholder={t.nationalId} title={t.nationalIdHint}/></label></>}{mode==='login'?<label>{t.emailOrUserCode}<input required name="identifier" autoComplete="username" placeholder={t.emailOrUserCode}/></label>:<label>{t.email}<input required name="email" type="email" autoComplete="email" placeholder="operator@boldtrace.ai"/></label>}<label>{t.password}<input required name="password" type="password" minLength={8} autoComplete={mode==='login'?'current-password':'new-password'} placeholder="••••••••••••"/></label>{mode==='login'&&<div className="auth-row"><label className="check"><input type="checkbox" name="rememberMe"/> {t.rememberMe}</label></div>}{mode==='register'&&<label className="check terms-check"><input required type="checkbox" name="termsAccepted"/> {t.termsCheckbox}</label>}{error&&<p className="auth-error" role="alert">{error}</p>}<button className="primary-action" disabled={busy}>{busy?t.authorizing:mode==='login'?t.login:t.register}</button></form><div className="security-note"><span>◇</span><p><b>Encrypted access</b><br/>Session and account controls are protected by the BOLDTRACE security layer.</p></div></div></section><Footer/></div>;
+  return <div className="auth-page auth-v3"><div className="auth-grid"/><header className="auth-header"><Brand/><div className="auth-v3-tools"><LanguageSelector/><div className="auth-v3-theme"><ThemeSelector/></div></div></header><main className="auth-v3-main"><section className="auth-v3-intro"><div className="auth-v3-kicker">BOLDTRACE / SECURE MARKET INTELLIGENCE</div><h1>{t.welcome}</h1><p>{t.subtitle}</p><div className="auth-v3-status" aria-label="System readiness"><div><span>MARKET FEEDS</span><b>ONLINE</b></div><div><span>RISK GUARDIAN</span><b>ACTIVE</b></div><div><span>ADAPTIVE LEARNING</span><b>READY</b></div></div></section><section className="auth-v3-card"><div className="auth-v3-card-head"><span>SECURE OPERATOR ACCESS</span><h2>{mode==='login'?t.login:t.register}</h2></div><div className="auth-tabs"><button type="button" className={mode==='login'?'active':''} onClick={()=>{setMode('login');setError(null);setPending(false)}}>{t.login}</button><button type="button" className={mode==='register'?'active':''} onClick={()=>{setMode('register');setError(null);setPending(false)}}>{t.register}</button></div>{pending&&<div className="auth-pending" role="status"><b>{t.pendingApprovalTitle}</b><p>{t.pendingApprovalBody}</p></div>}<form onSubmit={submit}>{mode==='register'&&<><label>{t.firstName}<input required name="firstName" autoComplete="given-name" placeholder={t.firstName}/></label><label>{t.lastName}<input required name="lastName" autoComplete="family-name" placeholder={t.lastName}/></label><label>{t.userCode}<input required name="userCode" minLength={4} maxLength={20} pattern="[A-Za-z0-9]{4,20}" placeholder={t.userCode} title={t.userCodeHint}/></label><label>{t.country}<select required name="country" defaultValue=""><option value="" disabled>{t.country}</option>{countries.map(c=><option key={c.code} value={c.code}>{c.name}</option>)}</select></label><label>{t.nationalId}<input required name="nationalId" placeholder={t.nationalId} title={t.nationalIdHint}/></label></>}{mode==='login'?<label>{t.emailOrUserCode}<input required name="identifier" autoComplete="username" placeholder={t.emailOrUserCode}/></label>:<label>{t.email}<input required name="email" type="email" autoComplete="email" placeholder="operator@boldtrace.ai"/></label>}<label>{t.password}<input required name="password" type="password" minLength={8} autoComplete={mode==='login'?'current-password':'new-password'} placeholder="••••••••••••"/></label>{mode==='login'&&<div className="auth-row"><label className="check"><input type="checkbox" name="rememberMe"/> {t.rememberMe}</label></div>}{mode==='register'&&<label className="check terms-check"><input required type="checkbox" name="termsAccepted"/> {t.termsCheckbox}</label>}{error&&<p className="auth-error" role="alert">{error}</p>}<button className="primary-action" disabled={busy}>{busy?t.authorizing:mode==='login'?t.login:t.register}</button></form><div className="security-note"><p><b>Encrypted operator session</b><br/>Authentication, consent and authorization remain server-enforced.</p></div></section></main><Footer/></div>;
 }
