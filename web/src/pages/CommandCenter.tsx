@@ -28,10 +28,10 @@ export function CommandCenter() {
     <div className="workstation-grid">
       <aside className="ws-pane ws-watchlist">
         <div className="ws-pane-head"><strong>{t.navScanner}</strong><span>{watchlist?.length ?? 0}</span></div>
-        <div className="ws-watch-search"><input type="search" value={watchQuery} onChange={e => setWatchQuery(e.target.value)} placeholder={t.ccWatchlistSearch} aria-label={t.ccWatchlistSearch} /></div>
+        <div className="ws-watch-search"><i aria-hidden="true">⌕</i><input type="search" value={watchQuery} onChange={e => setWatchQuery(e.target.value)} placeholder={t.ccWatchlistSearch} aria-label={t.ccWatchlistSearch} /></div>
         <div className="ws-watch-tabs"><span>{t.colMarket}</span><span>{t.colDecision}</span><span>{t.colRisk}</span></div>
         <div className="ws-watchlist-body">
-          {watchlist?.map(item => <div className="ws-watch-row" key={item.symbol}>
+          {watchlist?.map(item => <div className={`ws-watch-row${item.symbol === data.symbol ? ' active' : ''}`} key={item.symbol}>
             <div className="ws-watch-symbol"><strong>{item.symbol}</strong><small>{scannerStatusLabel(item.status, t)}</small></div>
             <div className={`ws-watch-decision decision ${item.market?.decision.toLowerCase().replaceAll(' ','-') ?? 'no-trade'}`}>{item.market?.decision ?? '—'}</div>
             <div className="ws-watch-risk">{item.market ? `${item.market.risk.toFixed(0)}%` : '—'}</div>
