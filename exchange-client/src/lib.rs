@@ -18,7 +18,14 @@ pub use funding_stream::fetch_funding_rate_history;
 pub use open_interest::fetch_open_interest;
 pub use redis_publisher::RedisPublisher;
 
-const MAX_BINANCE_STREAMS_PER_CONNECTION: usize = 900;
+// Binance's combined-stream WebSocket endpoint rejects the request with
+// HTTP 414 once the `?streams=` query string gets too long. At the old
+// value of 900 (450 symbols x 2 streams/connection), a full "ALL" symbol
+// universe (500+ USDT perpetuals, some with long meme-coin names like
+// `1000000mogusdt`) reliably triggered a permanent 414 reconnect loop on
+// both the candle and funding/depth connections. 160 keeps each combined
+// URL comfortably under a few KB even for the longest symbol names.
+const MAX_BINANCE_STREAMS_PER_CONNECTION: usize = 160;
 const MAX_BYBIT_SYMBOLS_PER_CONNECTION: usize = 50;
 
 fn chunk_symbols(symbols: &[String], max_symbols: usize) -> Vec<Vec<String>> {
