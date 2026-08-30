@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { api } from '../api/client';
 import { useApi } from '../api/useApi';
 import { useIntelligence } from '../api/useIntelligence';
@@ -12,11 +13,13 @@ export function CommandCenter() {
   const history = useApi(() => api.history(30), [], 30000);
   const health = useApi(() => api.health(), [], 15000);
   const { t } = useI18n();
+  const [watchQuery, setWatchQuery] = useState('');
   const realized = historicalPoint(performance.data);
   const showHistorical = hasMeaningfulHistory(realized);
   const stale = data ? !isFresh(data.freshnessMs) : false;
   const blocked = data?.decision === 'NO TRADE';
   const decisionClass = data?.decision.toLowerCase().replaceAll(' ', '-') ?? 'no-trade';
+  const watchlist = scanner.data?.filter(item => item.symbol.toLowerCase().includes(watchQuery.trim().toLowerCase()));
 
   if (loading && !data) return <div className="page workstation-page"><section className="panel empty-state"><h2>{t.ccConnecting}</h2></section></div>;
   if (!data) return <div className="page workstation-page"><section className="panel empty-state" role="alert"><h2>{t.ccUnavailable}</h2><p>{error}</p><button onClick={refresh}>{t.retryConnection}</button></section></div>;
@@ -24,15 +27,16 @@ export function CommandCenter() {
   return <div className="page workstation-page">
     <div className="workstation-grid">
       <aside className="ws-pane ws-watchlist">
-        <div className="ws-pane-head"><strong>{t.navScanner}</strong><span>{scanner.data?.length ?? 0}</span></div>
-        <div className="ws-watch-tabs"><span className="active">{t.colMarket}</span><span>{t.colStatus}</span></div>
+        <div className="ws-pane-head"><strong>{t.navScanner}</strong><span>{watchlist?.length ?? 0}</span></div>
+        <div className="ws-watch-search"><input type="search" value={watchQuery} onChange={e => setWatchQuery(e.target.value)} placeholder={t.ccWatchlistSearch} aria-label={t.ccWatchlistSearch} /></div>
+        <div className="ws-watch-tabs"><span>{t.colMarket}</span><span>{t.colDecision}</span><span>{t.colRisk}</span></div>
         <div className="ws-watchlist-body">
-          {scanner.data?.map(item => <div className="ws-watch-row" key={item.symbol}>
+          {watchlist?.map(item => <div className="ws-watch-row" key={item.symbol}>
             <div className="ws-watch-symbol"><strong>{item.symbol}</strong><small>{scannerStatusLabel(item.status, t)}</small></div>
             <div className={`ws-watch-decision decision ${item.market?.decision.toLowerCase().replaceAll(' ','-') ?? 'no-trade'}`}>{item.market?.decision ?? '—'}</div>
             <div className="ws-watch-risk">{item.market ? `${item.market.risk.toFixed(0)}%` : '—'}</div>
           </div>)}
-          {!scanner.loading && (!scanner.data || scanner.data.length === 0) && <div className="ws-side-copy" style={{padding:10}}>{scanner.error || t.scannerUnavailable}</div>}
+          {!scanner.loading && (!watchlist || watchlist.length === 0) && <div className="ws-side-copy" style={{padding:10}}>{scanner.error || (scanner.data?.length ? t.ccWatchlistNoMatch : t.scannerUnavailable)}</div>}
         </div>
       </aside>
 
@@ -94,6 +98,7 @@ export function CommandCenter() {
       <section className="ws-pane ws-bottom">
         <div className="ws-history">
           <div className="ws-pane-head"><strong>{t.navHistory}</strong><span>{history.data?.length ?? 0}</span></div>
+          <div className="ws-history-row ws-history-head"><span>{t.colMarket}</span><span>{t.colDecision}</span><span>{t.pcAvgReturn}</span><span>{t.colHorizon}</span><span>{t.colStatus}</span></div>
           <div className="ws-history-body">
             {history.data?.map(item => <div className="ws-history-row" key={item.id}><b>{item.symbol}</b><span>{item.decision} · {item.confidence.toFixed(0)}%</span><span className={item.realizedReturn === undefined ? '' : item.realizedReturn >= 0 ? 'positive' : 'negative'}>{item.realizedReturn !== undefined ? `${item.realizedReturn >= 0 ? '+' : ''}${item.realizedReturn.toFixed(2)}%` : '—'}</span><span>{item.horizon}</span><small>{item.outcome ?? t.historyPending}</small></div>)}
             {!history.loading && (!history.data || history.data.length === 0) && <div className="ws-side-copy" style={{padding:10}}>{history.error || t.historyEmpty}</div>}
