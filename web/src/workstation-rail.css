@@ -1,18 +1,22 @@
-/* Compact primary rail for workstation mode. The secondary market list lives inside Command Center. */
+/* Compact primary rail for workstation mode (Command Center's dense grid
+   needs the extra width). Scoped to pages that actually render
+   .workstation-page so other pages keep the normal sidebar, and only
+   applies once the rail is actually collapsed (Command Center starts
+   collapsed by default, but the toggle still expands it back to full
+   labels like every other page). */
 @media(min-width:701px){
-  .app-shell.workspace-shell,.app-shell.workspace-shell.is-collapsed{grid-template-columns:72px minmax(0,1fr)!important}
-  .sidebar.workspace-sidebar{padding:10px 7px!important}
-  .sidebar-brand{height:52px;padding:0 0 10px!important;justify-content:center!important}
-  .sidebar-brand .brand>div,.nav-group-title,.nav-item>span:not(.nav-icon),.sidebar-status span{display:none!important}
-  .sidebar-brand .icon-button{display:none!important}
-  .sidebar-brand .brand{justify-content:center}.sidebar-brand .brand-mark{width:30px;height:30px}
-  .workspace-nav{gap:8px!important}.nav-group{gap:3px!important}
-  .nav-item{min-height:40px!important;padding:8px!important;justify-content:center!important;border-radius:3px!important}
-  .nav-icon{width:auto!important;font-size:15px!important}
-  .sidebar-status{justify-content:center!important;padding:12px 0!important}
-  .workspace-content,.content{padding:10px 10px 18px!important}
-  .workspace-topbar,.topbar{height:48px!important;padding:0 12px!important}
-  .workspace-context .workspace-kicker{display:none}.workspace-context small{display:none}.workspace-context strong{font-size:11px!important}
-  .theme-cycle{height:30px!important;min-width:30px!important;padding:0 7px!important}.theme-cycle b{display:none}.icon-button{height:30px!important;min-width:30px!important}.profile-button{padding:2px 5px!important}.profile-button>span{width:25px!important;height:25px!important}.profile-button div{display:none}
+  .app-shell.workspace-shell.is-collapsed:has(.workstation-page){grid-template-columns:72px minmax(0,1fr)!important}
+  .app-shell.workspace-shell.is-collapsed:has(.workstation-page) .sidebar.workspace-sidebar{padding:10px 7px!important}
+  .app-shell.workspace-shell.is-collapsed:has(.workstation-page) .sidebar-brand{height:52px;padding:0 0 10px!important;justify-content:center!important}
+  .app-shell.workspace-shell.is-collapsed:has(.workstation-page) .sidebar-brand .brand>div,.app-shell.workspace-shell.is-collapsed:has(.workstation-page) .nav-group-title,.app-shell.workspace-shell.is-collapsed:has(.workstation-page) .nav-item>span:not(.nav-icon),.app-shell.workspace-shell.is-collapsed:has(.workstation-page) .sidebar-status span{display:none!important}
+  .app-shell.workspace-shell.is-collapsed:has(.workstation-page) .sidebar-brand .brand{justify-content:center}.app-shell.workspace-shell.is-collapsed:has(.workstation-page) .sidebar-brand .brand-mark{width:30px;height:30px}
+  .app-shell.workspace-shell.is-collapsed:has(.workstation-page) .workspace-nav{gap:8px!important}.app-shell.workspace-shell.is-collapsed:has(.workstation-page) .nav-group{gap:3px!important}
+  .app-shell.workspace-shell.is-collapsed:has(.workstation-page) .nav-item{min-height:40px!important;padding:8px!important;justify-content:center!important;border-radius:3px!important}
+  .app-shell.workspace-shell.is-collapsed:has(.workstation-page) .nav-icon{width:auto!important;font-size:15px!important}
+  .app-shell.workspace-shell.is-collapsed:has(.workstation-page) .sidebar-status{justify-content:center!important;padding:12px 0!important}
+  .app-shell.workspace-shell:has(.workstation-page) .workspace-content,.app-shell.workspace-shell:has(.workstation-page) .content{padding:10px 10px 18px!important}
+  .app-shell.workspace-shell:has(.workstation-page) .workspace-topbar,.app-shell.workspace-shell:has(.workstation-page) .topbar{height:48px!important;padding:0 12px!important}
+  .app-shell.workspace-shell:has(.workstation-page) .workspace-context .workspace-kicker{display:none}.app-shell.workspace-shell:has(.workstation-page) .workspace-context small{display:none}.app-shell.workspace-shell:has(.workstation-page) .workspace-context strong{font-size:11px!important}
+  .app-shell.workspace-shell:has(.workstation-page) .theme-cycle{height:30px!important;min-width:30px!important;padding:0 7px!important}.app-shell.workspace-shell:has(.workstation-page) .theme-cycle b{display:none}.app-shell.workspace-shell:has(.workstation-page) .icon-button{height:30px!important;min-width:30px!important}.app-shell.workspace-shell:has(.workstation-page) .profile-button{padding:2px 5px!important}.app-shell.workspace-shell:has(.workstation-page) .profile-button>span{width:25px!important;height:25px!important}.app-shell.workspace-shell:has(.workstation-page) .profile-button div{display:none}
 }
 @media(max-width:700px){.workspace-content,.content{padding:0!important}.workspace-topbar,.topbar{height:48px!important}.workstation-page{padding:0!important}}
